@@ -5,7 +5,7 @@ $__local = (getenv('DB_HOST') === false);
 define('DB_HOST', getenv('DB_HOST') ?: 'sql.freedb.tech');
 define('DB_PORT', (int)(getenv('DB_PORT') ?: 3306));
 define('DB_USER', getenv('DB_USER') ?: 'u_sMvIn5');
-define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : 'YOUR_FREEDB_PASSWORD_HERE');
+define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : '7IIsMkNROzPB');
 define('DB_NAME', getenv('DB_NAME') ?: 'freedb_8Y0ESw9X');
 
 date_default_timezone_set('Asia/Manila');
