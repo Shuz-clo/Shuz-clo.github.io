@@ -3,7 +3,7 @@
 // save_score.php and results_2.php (columns). To add a rater later, add it here.
 if (!function_exists('rater_list')) {
     function rater_list(): array {
-        return ['ADMIN', 'ENDUSER', 'END-USER', 'CHIEF', 'CHAIR', 'VICE-CHAIR', 'UNION', 'GAD', 'VICE'];
+        return ['ADMIN', 'END-USER', 'CHIEF-PERSONNEL', 'CHAIR', 'VICE-CHAIR', 'UNION', 'GAD', 'ALTERNATE'];
     }
 }
 
