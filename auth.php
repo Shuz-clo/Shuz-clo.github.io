@@ -1,6 +1,10 @@
 <?php
+if (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
 // Hardened session start: HttpOnly + SameSite cookie, Secure when on HTTPS
 if (session_status() === PHP_SESSION_NONE) {
+// Hardened session start: HttpOnly + SameSite cookie, Secure when on HTTPS
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
