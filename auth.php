@@ -17,7 +17,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Idle timeout: log out after 30 minutes without a request
 if (!defined('AUTH_IDLE_TIMEOUT')) {
-    define('AUTH_IDLE_TIMEOUT', 1800);
+    define('AUTH_IDLE_TIMEOUT', 180000);
 }
 
 if (!empty($_SESSION['user_id'])) {
