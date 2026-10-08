@@ -27,8 +27,8 @@ try {
             <hr>
             <p><strong>Troubleshooting Steps:</strong></p>
             <ol>
-                <li>Open <a href='http://localhost/phpmyadmin' target='_blank'>http://localhost/phpmyadmin</a> in your browser.</li>
-                <li>Verify if a database named <strong><code>" . htmlspecialchars(DB_NAME) . "</code></strong> exists.</li>
+                <li>Verify your database host is <strong><code>sql.freedb.tech</code></strong>.</li>
+                <li>Verify if a database named <strong><code>" . htmlspecialchars(DB_NAME) . "</code></strong> exists on FreeDB.</li>
             </ol>
         </div>
     ");
