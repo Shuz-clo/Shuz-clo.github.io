@@ -1,19 +1,18 @@
 <?php
-// Move this file OUTSIDE the web root when you publish, and update the
-// require_once path in db.php / login.php / register.php / logout.php accordingly.
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');      // production: use a limited MySQL user, not root
-define('DB_PASS', '');          // production: set a real password
-define('DB_NAME', 'interview_rating');
+// Settings come from environment variables (set them in Render -> Environment).
+// On your own XAMPP none are set, so the local defaults below are used.
+$__local = (getenv('DB_HOST') === false);
+
+define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
+define('DB_PORT', (int)(getenv('DB_PORT') ?: 3306));
+define('DB_USER', getenv('DB_USER') ?: 'root');
+define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : '');
+define('DB_NAME', getenv('DB_NAME') ?: 'interview_rating');
 
 date_default_timezone_set('Asia/Manila');
 
-// LOCAL: true shows error details on screen.
-// PUBLISHED: you MUST set this to false.
-define('DEBUG', true);
+// Error details show only on your own computer; online they stay hidden.
+define('DEBUG', $__local);
 
-// Anyone signing up on register.php must type this code.
-// Change it to a long random string and share it only with people you trust.
-define('REGISTRATION_CODE', 'poopoo');
-
-define('ADMIN_HASH', '$2y$10$Ze88BYCaMEOtrUEgOZmlKeU9GQdB9B482Gqo7GnoK5fib16pBAZam');
+// Online: set REGISTRATION_CODE in Render. If it is forgotten, nobody can register.
+define('REGISTRATION_CODE', getenv('REGISTRATION_CODE') ?: ($__local ? 'local-test-code' : bin2hex(random_bytes(16))));
