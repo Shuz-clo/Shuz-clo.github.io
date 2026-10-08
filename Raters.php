@@ -25,6 +25,30 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
 
 // Creates what the scoring needs if it is not there yet (safe to run every time)
 function ensure_schema(mysqli $conn): void {
+    // Creates the main applicants table on a fresh database (does nothing if it exists)
+    $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
+      `id` int(11) NOT NULL AUTO_INCREMENT,
+      `candidate_name` varchar(255) DEFAULT NULL,
+      `position_title` varchar(255) DEFAULT NULL,
+      `office_location` varchar(100) DEFAULT NULL,
+      `office_name` varchar(255) DEFAULT '',
+      `interview_date` varchar(255) DEFAULT NULL,
+      `rater_name` varchar(255) DEFAULT NULL,
+      `evidence_json` text DEFAULT NULL,
+      `cc1` decimal(4,2) DEFAULT NULL, `cc2` decimal(4,2) DEFAULT NULL, `cc3` decimal(4,2) DEFAULT NULL, `cc4` decimal(4,2) DEFAULT NULL, `cc5` decimal(4,2) DEFAULT NULL,
+      `oc1` decimal(4,2) DEFAULT NULL, `oc2` decimal(4,2) DEFAULT NULL, `oc3` decimal(4,2) DEFAULT NULL, `oc4` decimal(4,2) DEFAULT NULL, `oc5` decimal(4,2) DEFAULT NULL,
+      `lc1` decimal(4,2) DEFAULT NULL, `lc2` decimal(4,2) DEFAULT NULL, `lc3` decimal(4,2) DEFAULT NULL, `lc4` decimal(4,2) DEFAULT NULL, `lc5` decimal(4,2) DEFAULT NULL,
+      `pcp1` decimal(4,2) DEFAULT NULL, `pcp2` decimal(4,2) DEFAULT NULL, `pcp3` decimal(4,2) DEFAULT NULL, `pco4` decimal(4,2) DEFAULT NULL,
+      `core_avg` decimal(4,2) DEFAULT NULL, `org_avg` decimal(4,2) DEFAULT NULL, `lead_avg` decimal(4,2) DEFAULT NULL, `func_avg` decimal(4,2) DEFAULT NULL,
+      `overall_avg` decimal(4,2) DEFAULT NULL,
+      `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+      `psycho_extra1` decimal(4,2) DEFAULT NULL, `psycho_extra2` decimal(4,2) DEFAULT NULL, `psycho_extra3` decimal(4,2) DEFAULT NULL, `psycho_extra4` decimal(4,2) DEFAULT NULL,
+      `potential_extra1` decimal(4,2) DEFAULT NULL, `potential_extra2` decimal(4,2) DEFAULT NULL, `potential_extra3` decimal(4,2) DEFAULT NULL, `potential_extra4` decimal(4,2) DEFAULT NULL,
+      `psycho_ave` decimal(4,2) DEFAULT NULL, `potential_ave` decimal(4,2) DEFAULT NULL,
+      `remarks` text DEFAULT NULL,
+      PRIMARY KEY (`id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
     $conn->query("CREATE TABLE IF NOT EXISTS candidate_scores (
         candidate_id INT NOT NULL,
         rater VARCHAR(30) NOT NULL,
