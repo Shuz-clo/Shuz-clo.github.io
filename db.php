@@ -12,6 +12,14 @@ try {
     $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
     $conn->set_charset("utf8mb4");
     $conn->query("SET time_zone = '+08:00'");
+
+    // Ensure database connection closes when script execution completes
+    register_shutdown_function(function() use ($conn) {
+        if ($conn instanceof mysqli && $conn->ping()) {
+            $conn->close();
+        }
+    });
+
 } catch (mysqli_sql_exception $e) {
     error_log('DB connection failed: ' . $e->getMessage());
     http_response_code(500);
