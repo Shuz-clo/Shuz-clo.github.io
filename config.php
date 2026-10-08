@@ -14,6 +14,6 @@ define('DEBUG', true);
 
 // Anyone signing up on register.php must type this code.
 // Change it to a long random string and share it only with people you trust.
-define('REGISTRATION_CODE', 'CHANGE-ME-TO-A-LONG-RANDOM-STRING');
+define('REGISTRATION_CODE', 'poopoo');
 
 define('ADMIN_HASH', '$2y$10$Ze88BYCaMEOtrUEgOZmlKeU9GQdB9B482Gqo7GnoK5fib16pBAZam');
