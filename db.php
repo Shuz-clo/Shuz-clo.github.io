@@ -9,7 +9,7 @@ if (!DEBUG) {
 }
 
 try {
-    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
     $conn->set_charset("utf8mb4");
     $conn->query("SET time_zone = '+08:00'");
 } catch (mysqli_sql_exception $e) {
