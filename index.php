@@ -253,8 +253,129 @@ require_role(['rater', 'user']);
         <td colspan="2" class="info-cell" style="padding-bottom: 15px;">Date: <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" style="width: 70%; display: inline-block;"></td>
     </tr>
 
-    <!-- ===== Core + Organizational Competencies: built by renderCompetencies() in the script below ===== -->
-    <tbody id="competencyRows"></tbody>
+    <!-- ===== Core Competencies ===== -->
+    <tr>
+        <th class="sec-header">Core Competencies</th>
+        <th class="sec-header">Evidence</th>
+        <th class="sec-header">Rating</th>
+    </tr>
+
+    <tr>
+        <td class="comp-title">CC1 - DISCIPLINE</td>
+        <td class="ev-label">Advanced</td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Serves as a good role model on DENR values and ethics to staff/peers</td>
+        <td><input type="text" name="evidence_cc1"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc1" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">CC2 - EXCELLENCE</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Anticipates, identifies and manages stakeholders’ standards and requirements towards excellent customer service through improving sense of responsibility and competence</td>
+        <td><input type="text" name="evidence_cc2"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc2" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">CC3 - NOBILITY</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Influences others to observe virtue, goodness, honor, justness and decency in all situations</td>
+        <td><input type="text" name="evidence_cc3"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc3" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">CC4 - RESPONSIBILITY</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Leads in the observance of the principle of transparency and accountability in the workplace</td>
+        <td><input type="text" name="evidence_cc4"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc4" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">CC5 - CARING FOR THE ENVIRONMENT AND NATURAL RESOURCES</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Serves as a good role model in conserving and preserving the environment to peers and staff</td>
+        <td><input type="text" name="evidence_cc5"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc5" placeholder="0.00"></td>
+    </tr>
+
+    <!-- ===== Organizational Competencies ===== -->
+    <tr>
+        <th class="sec-header">Organizational Competencies</th>
+        <th class="sec-header">Advanced</th>
+        <th class="sec-header"></th>
+    </tr>
+
+    <tr>
+        <td class="comp-title">OC1 - WRITING EFFECTIVELY</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Produces written work from scratch with some guidance while complying to agreed or prescribed standards of communicating with the bureaucracy</td>
+        <td><input type="text" name="evidence_oc1"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc1" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">OC2 - SPEAKING EFFECTIVELY</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation</td>
+        <td><input type="text" name="evidence_oc2"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc2" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">OC3 - TECHNOLOGY LITERACY AND MANAGING INFORMATION</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals</td>
+        <td><input type="text" name="evidence_oc3"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc3" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">OC4 - PROJECT MANAGEMENT</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Leads in project management activities</td>
+        <td><input type="text" name="evidence_oc4"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc4" placeholder="0.00"></td>
+    </tr>
+
+    <tr>
+        <td class="comp-title">OC5 - COMPLETE STAFF WORK (CSW)</td>
+        <td></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Leads the practice of CSW in his/her office/unit</td>
+        <td><input type="text" name="evidence_oc5"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc5" placeholder="0.00"></td>
+    </tr>
 
     <!-- ===== Leadership Competencies ===== -->
     <tr>
@@ -475,8 +596,6 @@ require_role(['rater', 'user']);
             custom.style.display = 'none';
             backBtn.style.display = 'none';
         }
-
-        renderCompetencies();
     }
 
     function backToPositionList() {
@@ -486,142 +605,9 @@ require_role(['rater', 'user']);
         togglePositionOther();
     }
 
-    // ===== Dynamic competencies (Core + Organizational) by Office & Position =====
-    // Each section can hold up to 5 rows, because the database columns are cc1-cc5 and oc1-oc5.
-    // A row's input name is always cc1..cc5 / oc1..oc5 (by slot), so submit_score.php and the
-    // averages work unchanged. A row that is not shown is simply not submitted, and the
-    // averages only count rows that have a rating.
-    const COMPETENCY_DEFAULT = {
-        coreLevel: 'Advanced',
-        core: [
-            { title: "DISCIPLINE",
-              desc:  "Serves as a good role model on DENR values and ethics to staff/peers" },
-            { title: "EXCELLENCE",
-              desc:  "Anticipates, identifies and manages stakeholders’ standards and requirements towards excellent customer service through improving sense of responsibility and competence" },
-            { title: "NOBILITY",
-              desc:  "Influences others to observe virtue, goodness, honor, justness and decency in all situations" },
-            { title: "RESPONSIBILITY",
-              desc:  "Leads in the observance of the principle of transparency and accountability in the workplace" },
-            { title: "CARING FOR THE ENVIRONMENT AND NATURAL RESOURCES",
-              desc:  "Serves as a good role model in conserving and preserving the environment to peers and staff" }
-        ],
-        orgLevel: 'Advanced',
-        org: [
-            { title: "WRITING EFFECTIVELY",
-              desc:  "Produces written work from scratch with some guidance while complying to agreed or prescribed standards of communicating with the bureaucracy" },
-            { title: "SPEAKING EFFECTIVELY",
-              desc:  "Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation" },
-            { title: "TECHNOLOGY LITERACY AND MANAGING INFORMATION",
-              desc:  "Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals" },
-            { title: "PROJECT MANAGEMENT",
-              desc:  "Leads in project management activities" },
-            { title: "COMPLETE STAFF WORK (CSW)",
-              desc:  "Leads the practice of CSW in his/her office/unit" }
-        ]
-    };
-
-    // Overrides. Keys are UPPERCASE and may be:  'OFFICE|POSITION' (most specific),  'POSITION',  or 'OFFICE'.
-    // Search order: OFFICE|POSITION -> POSITION -> OFFICE -> COMPETENCY_DEFAULT. Each of the four fields
-    // (coreLevel, core, orgLevel, org) falls back on its own, so you only list what differs.
-    // Optional per row:  evidence: ['suggestion', ...]  (shown as suggestions, still free text)
-    //                    rating: 8                      (pre-filled until the rater changes it)
-    const COMPETENCY_OVERRIDES = {
-        /* TEMPLATE - copy, remove the comment marks, and fill in the real wording:
-        'PENRO ILOILO|LMO II': {
-            coreLevel: 'Intermediate',
-            core: [
-                { title: 'DISCIPLINE',  desc: '...' , evidence: ['...'] },
-                { title: 'EXCELLENCE',  desc: '...' }
-            ],
-            orgLevel: 'Intermediate',
-            org: [
-                { title: 'WRITING EFFECTIVELY', desc: '...' }
-            ]
-        },
-        'REGIONAL OFFICE': { orgLevel: 'Advanced' },
-        */
-    };
-
-    const normKey = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toUpperCase();
-    const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const hasOwn  = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-
-    function resolveCompetencies(office, position) {
-        const o = normKey(office), p = normKey(position);
-        const chain = [];
-        [o + '|' + p, p, o].forEach(k => { if (k && k !== '|' && hasOwn(COMPETENCY_OVERRIDES, k)) chain.push(COMPETENCY_OVERRIDES[k]); });
-        chain.push(COMPETENCY_DEFAULT);
-        const pick = field => { for (const s of chain) if (s[field] !== undefined) return s[field]; };
-        return { coreLevel: pick('coreLevel'), core: pick('core'), orgLevel: pick('orgLevel'), org: pick('org') };
-    }
-
-    // Builds the table rows (same markup/classes as before) for one section. No DOM access here.
-    function competencySectionHtml(kind, items, level) {
-        const list = (items || []).slice(0, 5);
-        if (!list.length) return '';
-        const isCore = kind === 'cc';
-        let html = '<tr><th class="sec-header">' + (isCore ? 'Core Competencies' : 'Organizational Competencies') + '</th>' +
-                   '<th class="sec-header">' + (isCore ? 'Evidence' : escHtml(level)) + '</th>' +
-                   '<th class="sec-header">' + (isCore ? 'Rating' : '') + '</th></tr>';
-        list.forEach((it, i) => {
-            const code = kind + (i + 1);
-            const key  = [code, it.title, it.desc].join('|'); // same wording in the same slot = same rated item
-            const ev   = Array.isArray(it.evidence) && it.evidence.length;
-            html += '<tr><td class="comp-title">' + kind.toUpperCase() + (i + 1) + ' - ' + escHtml(it.title) + '</td>' +
-                    (isCore && i === 0 ? '<td class="ev-label">' + escHtml(level) + '</td>' : '<td></td>') + '<td></td></tr>' +
-                    '<tr><td>' + escHtml(it.desc) + '</td>' +
-                    '<td><input type="text" name="evidence_' + code + '" data-ck="' + escHtml(key) + '" data-field="evidence"' + (ev ? ' list="ev_' + code + '"' : '') + '>' +
-                    (ev ? '<datalist id="ev_' + code + '">' + it.evidence.map(e => '<option value="' + escHtml(e) + '">').join('') + '</datalist>' : '') + '</td>' +
-                    '<td><input type="number" step="0.01" min="0" max="10" name="' + code + '" data-ck="' + escHtml(key) + '" data-field="rating" placeholder="0.00"></td></tr>';
-        });
-        return html;
-    }
-
-    // What the rater already typed, kept per row so that switching position and back does not lose it
-    let compStash = {};
-
-    function stashCompetencyInputs() {
-        document.querySelectorAll('#competencyRows input[data-ck]').forEach(inp => {
-            const k = inp.dataset.ck;
-            (compStash[k] = compStash[k] || {})[inp.dataset.field] = inp.value;
-        });
-    }
-
-    function currentPositionValue() {
-        const sel = document.getElementById('position_title');
-        return sel.value === '__OTHER__' ? document.getElementById('position_custom').value : sel.value;
-    }
-
-    function renderCompetencies() {
-        const box = document.getElementById('competencyRows');
-        if (!box) return;
-        stashCompetencyInputs();
-        const set = resolveCompetencies(document.getElementById('office_name').value, currentPositionValue());
-        box.innerHTML = competencySectionHtml('cc', set.core, set.coreLevel) + competencySectionHtml('oc', set.org, set.orgLevel);
-
-        // Restore typed values, or apply the optional pre-filled rating
-        const defaults = {};
-        (set.core || []).slice(0, 5).forEach((it, i) => { defaults['cc' + (i + 1) + '|' + it.title + '|' + it.desc] = it.rating; });
-        (set.org  || []).slice(0, 5).forEach((it, i) => { defaults['oc' + (i + 1) + '|' + it.title + '|' + it.desc] = it.rating; });
-        box.querySelectorAll('input[data-ck]').forEach(inp => {
-            const saved = compStash[inp.dataset.ck];
-            if (saved && saved[inp.dataset.field] !== undefined) inp.value = saved[inp.dataset.field];
-            else if (inp.dataset.field === 'rating' && defaults[inp.dataset.ck] != null) inp.value = defaults[inp.dataset.ck];
-        });
-    }
-
-    // Typed "Others" position: re-check when the box loses focus
-    document.getElementById('position_custom').addEventListener('change', renderCompetencies);
-    renderCompetencies(); // first draw (default set)
-
     // After form.reset(), restore the dropdown state and the default position list
     document.getElementById('scoringForm').addEventListener('reset', () => {
-        setTimeout(() => {
-            compStash = {};
-            document.getElementById('competencyRows').innerHTML = '';
-            document.getElementById('position_custom').value = '';
-            updatePositionOptions();
-        }, 0);
+        setTimeout(() => { document.getElementById('position_custom').value = ''; updatePositionOptions(); }, 0);
     });
 
     // ===== Rater checkbox dropdown (keeps the order they were ticked) =====
