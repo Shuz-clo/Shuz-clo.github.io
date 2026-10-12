@@ -1,12 +1,13 @@
 <?php
-// Settings come from environment variables on Render, or fall back to FreeDB defaults locally.
+// Settings come from environment variables (set them in Render -> Environment).
+// On your own XAMPP none are set, so the local defaults below are used.
 $__local = (getenv('DB_HOST') === false);
 
-define('DB_HOST', getenv('DB_HOST') ?: 'sql.freedb.tech');
+define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
 define('DB_PORT', (int)(getenv('DB_PORT') ?: 3306));
-define('DB_USER', getenv('DB_USER') ?: 'u_sMvIn5');
-define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : '7IIsMkNROzPB');
-define('DB_NAME', getenv('DB_NAME') ?: 'freedb_8Y0ESw9X');
+define('DB_USER', getenv('DB_USER') ?: 'root');
+define('DB_PASS', getenv('DB_PASS') !== false ? getenv('DB_PASS') : '');
+define('DB_NAME', getenv('DB_NAME') ?: 'interview_rating');
 
 date_default_timezone_set('Asia/Manila');
 
