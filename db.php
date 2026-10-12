@@ -9,20 +9,7 @@ if (!DEBUG) {
 }
 
 try {
-    try {
-        // Normal path (identical online and locally)
-        $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
-    } catch (mysqli_sql_exception $e) {
-        // Only on your own computer, and only for "Unknown database" (1049):
-        // create the empty database, then connect again. Online this never runs.
-        if (!DEBUG || (int)$e->getCode() !== 1049) {
-            throw $e;
-        }
-        $tmp = new mysqli(DB_HOST, DB_USER, DB_PASS, '', DB_PORT);
-        $tmp->query("CREATE DATABASE IF NOT EXISTS `" . DB_NAME . "` CHARACTER SET utf8mb4");
-        $tmp->close();
-        $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
-    }
+    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
     $conn->set_charset("utf8mb4");
     $conn->query("SET time_zone = '+08:00'");
 } catch (mysqli_sql_exception $e) {
@@ -40,8 +27,8 @@ try {
             <hr>
             <p><strong>Troubleshooting Steps:</strong></p>
             <ol>
-                <li>Open the XAMPP Control Panel and make sure <strong>MySQL</strong> is started (green).</li>
                 <li>Open <a href='http://localhost/phpmyadmin' target='_blank'>http://localhost/phpmyadmin</a> in your browser.</li>
+                <li>Verify if a database named <strong><code>" . htmlspecialchars(DB_NAME) . "</code></strong> exists.</li>
             </ol>
         </div>
     ");
