@@ -8,17 +8,13 @@ require_once __DIR__ . '/config.php';
 ensure_auth_schema($conn);
 purge_expired_tokens($conn);
 
-// Must be logged in (anonymous visitors are sent to login.php)
 require_login();
 
-// Admins manage results from results_2.php, not this form. Check this BEFORE
-// require_role(), otherwise admins get a "no permission" message on the way.
 if (current_role() === 'admin') {
     header('Location: results_2.php');
     exit;
 }
 
-// Only raters and standard users may use the scoring form
 require_role(['rater', 'user']);
 ?>
 <!DOCTYPE html>
@@ -82,7 +78,6 @@ require_role(['rater', 'user']);
             word-wrap: break-word;
         }
 
-        /* Top Header Rows (Borderless) */
         .header-cell {
             border: none !important;
             text-align: center;
@@ -98,14 +93,12 @@ require_role(['rater', 'user']);
             padding: 10px 0;
         }
 
-        /* Candidate Info Section */
         .info-cell {
             border: none !important;
             padding: 4px 0;
             font-size: 13px;
         }
 
-        /* Table Input Formatting */
         input[type="text"], input[type="number"], select {
             width: 100%;
             padding: 4px;
@@ -123,7 +116,6 @@ require_role(['rater', 'user']);
             font-weight: bold;
         }
 
-        /* Section & Header Styles matching Excel sheet */
         .sec-header {
             background-color: #d9d9d9 !important;
             font-weight: bold !important;
@@ -147,13 +139,11 @@ require_role(['rater', 'user']);
             padding-top: 15px;
         }
 
-        /* Secret Trigger Style */
         .secret-trigger { 
             user-select: none; 
             cursor: default; 
         }
 
-        /* Print / Save as PDF: hide every button and make the form controls look like plain text */
        @media print {
     .btn-container, #positionBackBtn { display: none !important; }
     #raterDropdown > div { display: none !important; }
@@ -163,7 +153,6 @@ require_role(['rater', 'user']);
     input[type="text"]::placeholder { color: transparent; }
 }
 
-        /* Button Styling */
         .btn-container {
             margin-top: 20px;
             text-align: center;
@@ -195,7 +184,6 @@ require_role(['rater', 'user']);
 <?php endif; ?>
 
 <form id="scoringForm" action="submit_score.php" method="POST">
-<!-- Honeypot (bots fill this, humans never see it) -->
 <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px;">
 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
 
@@ -206,15 +194,12 @@ require_role(['rater', 'user']);
         <col class="col-rate">
     </colgroup>
 
-    <!-- Top Branding Headers -->
     <tr><td colspan="3" class="header-cell">Department of Environment and Natural Resources</td></tr>
     <tr><td colspan="3" class="header-cell">Region VI, Western Visayas</td></tr>
     <tr><td colspan="3" class="header-cell">Regional Human Resource Merit Promotion and Selection Board (RHRMPSB)</td></tr>       
     
-    <!-- Alt + Double-Click Trigger on INTERVIEW SCORING SHEET -->
     <tr><td colspan="3" class="header-title secret-trigger" ondblclick="goToAdminResults(event)">INTERVIEW SCORING SHEET</td></tr>
 
-    <!-- Candidate Info -->
     <tr>
         <td class="info-cell">NAME: <input type="text" name="candidate_name" placeholder="" required style="width: 75%; display: inline-block;"></td>
         <td colspan="2" class="info-cell">Position: 
@@ -254,7 +239,6 @@ require_role(['rater', 'user']);
         <td colspan="2" class="info-cell" style="padding-bottom: 15px;">Date: <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" style="width: 70%; display: inline-block;"></td>
     </tr>
 
-    <!-- ===== Core Competencies ===== -->
     <tr class="sec-core">
         <th class="sec-header">Core Competencies</th>
         <th class="sec-header">Evidence</th>
@@ -316,7 +300,6 @@ require_role(['rater', 'user']);
         <td><input type="number" step="0.01" min="0" max="10" name="cc5" placeholder="0.00"></td>
     </tr>
 
-    <!-- ===== Organizational Competencies ===== -->
     <tr class="sec-right">
         <th class="sec-header">Organizational Competencies</th>
         <th class="sec-header">Advanced</th>
@@ -378,7 +361,6 @@ require_role(['rater', 'user']);
         <td><input type="number" step="0.01" min="0" max="10" name="oc5" placeholder="0.00"></td>
     </tr>
 
-    <!-- ===== Leadership Competencies ===== -->
     <tr class="leadership-row sec-right">
         <th class="sec-header"><span id="lcHeadingText">Leadership Competencies</span><span id="lcHint" style="display:none; font-size:11px; font-weight:normal; opacity:0.85;"></span></th>
         <th class="sec-header" id="lcLevelLabel">Basic</th>
@@ -440,7 +422,6 @@ require_role(['rater', 'user']);
         <td><input type="number" step="0.01" min="0" max="10" name="lc5" placeholder="0.00"></td>
     </tr>
 
-    <!-- ===== Functional Competencies ===== -->
     <tr class="sec-right">
         <th class="sec-header">Functional Competencies</th>
         <th class="sec-header">Advanced</th>
@@ -491,7 +472,6 @@ require_role(['rater', 'user']);
         <td><input type="number" step="0.01" min="0" max="10" name="pco4" placeholder="0.00"></td>
     </tr>
 
-    <!-- Footer -->
     <tr>
         <td class="transparent">Rated by: <input type="text" name="rater_name" placeholder="Rater Name" style="width: 70%; display: inline-block;"></td>
         <td class="transparent" colspan="2">Raters:
@@ -520,7 +500,6 @@ require_role(['rater', 'user']);
 </form>
 
 <script>
-    // Positions allowed per office. Keys must match the office_name <option> values exactly.
     const POSITIONS_BY_OFFICE = {
         "Regional Office": [
             "ADMINISTRATIVE OFFICER III (CASHIER)", "ADMINISTRATIVE OFFICER V (CASHIER III)", "ACCOUNTANT III",
@@ -548,10 +527,8 @@ require_role(['rater', 'user']);
             "Forester I (Guimbal)", "Records Officer (PENRO Iloilo)", "PLANNING OFFICER I (PENRO Iloilo)",
             "Forester I (Barotac)", "MLO I (Sara)", "CAO", "LMO II", "GE"
         ]
-        // Offices not listed above (Negros Occidental) use DEFAULT_POSITIONS below.
     };
 
-    // Fallback list for offices with no specific list yet (your original 8 options)
     const DEFAULT_POSITIONS = [
         "Land Management Officer I", "Land Management Officer II",
         "Environmental Management Specialist I", "Environmental Management Specialist II",
@@ -559,7 +536,6 @@ require_role(['rater', 'user']);
         "Forest Technician I", "Community Development Officer I"
     ];
 
-    // Keep every rating cell between 0 and 10 while typing
     document.getElementById('scoringForm').addEventListener('input', e => {
         const el = e.target;
         if (el.type === 'number' && /^(cc|oc|lc|pcp|pco)\d$/.test(el.name || '')) {
@@ -568,34 +544,19 @@ require_role(['rater', 'user']);
         }
     });
 
-    // ===== Form layout =====
-    // Every account sees the whole sheet (Core, Organizational, Functional). Only LEADERSHIP can disappear.
-    // Where LEADERSHIP is NOT shown. Everything else (Core, Organizational, Functional) always shows.
-    // Positions listed here have no leadership in EVERY office (compared in upper case).
     const LEADERSHIP_HIDDEN_POSITIONS = ["SVEMS"];
-    // Optional: an office with no leadership at all, or only for some positions.
-    // Office name => "*" (every position) or a list of positions. Example: "PENRO Capiz": ["Forester I"]
     const LEADERSHIP_HIDDEN = {};
 
     function leadershipHidden(office, position) {
         const pos = String(position || '').trim();
-        // No position entered yet -> hide leadership (until a position is chosen).
         if (pos === '') return true;
-        // Explicit opt-out list (kept for compatibility).
         if (LEADERSHIP_HIDDEN_POSITIONS.includes(pos.toUpperCase())) return true;
         const rule = LEADERSHIP_HIDDEN[office];
         if (rule === "*" || (Array.isArray(rule) && rule.includes(pos))) return true;
-        // NEW RULE: positions NOT in the leadership list have no leadership section.
         return leadershipLevelFor(pos) === null;
     }
 
-    // ===== Leadership LEVEL =====
-    // The list below is the COMPLETE set of positions that get a Leadership section.
-    // Positions NOT in this list have the leadership rows removed automatically.
-    // Source: PDF_leadership.xlsx + SG 24 AND BELOW sheet.
-    // I = INTERMEDIATE, B = BASIC. KEEP IN SYNC with Raters.php leadership_level_titles().
     const LEADERSHIP_LEVELS = [
-        // --- INTERMEDIATE (I) ---
         ["Planning Officer V", "I"],
         ["Chief Administrative Officer", "I"],
         ["Attorney V", "I"],
@@ -606,7 +567,6 @@ require_role(['rater', 'user']);
         ["Community Environment & Natural Resources Officer", "I"],
         ["Community Environment & Natural Resources Officer (CENRO)", "I"],
 
-        // --- BASIC (B) ---
         ["Senior Communications Development Officer", "B"],
         ["Planning Officer IV", "B"],
         ["Planning Officer III", "B"],
@@ -632,8 +592,6 @@ require_role(['rater', 'user']);
         ["Land Management Officer III", "B"]
     ];
 
-    // Short forms people may type (any case, with or without spaces/dots/dashes): [abbreviation, roman numeral, level]
-    // KEEP IN SYNC with Raters.php leadership_level_aliases().
     const LEADERSHIP_ALIASES = [
         ["ATY","V","I"], ["ATY","IV","B"], ["ATY","III","B"], ["ATY","II","B"],
         ["ATTY","V","I"], ["ATTY","IV","B"], ["ATTY","III","B"], ["ATTY","II","B"],
@@ -647,8 +605,8 @@ require_role(['rater', 'user']);
         ["PENRO","","I"]
     ];
     const NUMERAL_DIGIT = { II: "2", III: "3", IV: "4", V: "5" };
+    const DIGIT_NUMERAL = { "2": "II", "3": "III", "4": "IV", "5": "V" };
 
-    // INTERMEDIATE descriptors for LC1-LC5 (BASIC ones are whatever is already written in the rows above)
     const LC_INTERMEDIATE = [
         "Ensures that others support the DENR’s mission, goals, agenda, climate, and policy",
         "Ensures the effective implementation of any change initiatives/programs of the DENR by guiding the team in the transition process",
@@ -660,7 +618,6 @@ require_role(['rater', 'user']);
     function normPosition(s) {
         return String(s || '').replace(/&/g, ' AND ').replace(/\s+/g, ' ').trim().toUpperCase();
     }
-    // Letters and digits only, so "PLO-V", "plo v" and "PLOV" are the same
     function compactPosition(s) {
         return normPosition(s).replace(/[^\p{L}\p{N}]/gu, '');
     }
@@ -669,20 +626,20 @@ require_role(['rater', 'user']);
     }
     const LEADERSHIP_LEVEL_MAP = (function () {
         const map = {};
-        LEADERSHIP_LEVELS.forEach(([t, lvl]) => { map[compactPosition(t)] = lvl; });          // full titles first
-        LEADERSHIP_LEVELS.forEach(([t, lvl]) => {                                               // then titles without parentheses
-            if (/\(\s*selected items\s*\)/i.test(t)) return;                                    // "(Selected Items)" is only I with its brackets
+        LEADERSHIP_LEVELS.forEach(([t, lvl]) => { map[compactPosition(t)] = lvl; });
+        LEADERSHIP_LEVELS.forEach(([t, lvl]) => {
+            if (/\(\s*selected items\s*\)/i.test(t)) return;
             const base = compactNoParens(t);
             if (!(base in map)) map[base] = lvl;
         });
-        LEADERSHIP_ALIASES.forEach(([abbr, numeral, lvl]) => {                                  // then short forms
+        LEADERSHIP_ALIASES.forEach(([abbr, numeral, lvl]) => {
             const keys = [abbr + numeral];
             if (numeral && NUMERAL_DIGIT[numeral]) keys.push(abbr + NUMERAL_DIGIT[numeral]);
+            if (numeral && DIGIT_NUMERAL[numeral]) keys.push(abbr + DIGIT_NUMERAL[numeral]);
             keys.forEach(k => { if (!(k in map)) map[k] = lvl; });
         });
         return map;
     })();
-    // 'I', 'B', or null when the position is not in the reference list
     function leadershipLevelFor(position) {
         const full = compactPosition(position);
         if (full === '') return null;
@@ -690,8 +647,52 @@ require_role(['rater', 'user']);
         const base = compactNoParens(position);
         return (base !== '' && base in LEADERSHIP_LEVEL_MAP) ? LEADERSHIP_LEVEL_MAP[base] : null;
     }
-    // Remember the BASIC wording that is already in the form
     const LC_BASIC = [1, 2, 3, 4, 5].map(i => document.getElementById('lcDesc' + i).textContent);
+
+    const CANONICAL_TITLE = (function () {
+        const map = {};
+        LEADERSHIP_LEVELS.forEach(([title]) => {
+            map[compactPosition(title)] = title;
+            const cp = compactNoParens(title);
+            if (!(cp in map)) map[cp] = title;
+        });
+        LEADERSHIP_ALIASES.forEach(([abbr, numeral, lvl]) => {
+            const canonical = LEADERSHIP_LEVELS.find(([t, l]) => {
+                if (l !== lvl) return false;
+                const ct = compactPosition(t);
+                if (!ct.startsWith(abbr)) return false;
+                if (numeral !== '' && !ct.endsWith(numeral)) return false;
+                return true;
+            });
+            if (!canonical) return;
+            const keys = new Set();
+            keys.add(abbr + numeral);
+            if (numeral && NUMERAL_DIGIT[numeral]) keys.add(abbr + NUMERAL_DIGIT[numeral]);
+            if (numeral && DIGIT_NUMERAL[numeral]) keys.add(abbr + DIGIT_NUMERAL[numeral]);
+            keys.forEach(k => { if (!(k in map)) map[k] = canonical[0]; });
+        });
+        return map;
+    })();
+
+    function canonicalPosition(s) {
+        const raw = String(s || '').trim();
+        if (raw === '') return '';
+        const full = compactPosition(raw);
+        if (full in CANONICAL_TITLE) return CANONICAL_TITLE[full];
+        const base = compactNoParens(raw);
+        if (base in CANONICAL_TITLE) return CANONICAL_TITLE[base];
+        return raw;
+    }
+
+    function snapPositionToCanonical() {
+        const custom = document.getElementById('position_custom');
+        if (!custom || custom.disabled) return;
+        const typed = custom.value.trim();
+        if (typed === '') return;
+        const canonical = canonicalPosition(typed);
+        if (canonical && canonical !== typed) custom.value = canonical;
+        applyFormLayout();
+    }
 
     function currentPosition() {
         const sel = document.getElementById('position_title');
@@ -704,10 +705,9 @@ require_role(['rater', 'user']);
         const position = currentPosition();
         const noLeadership = leadershipHidden(office, position);
 
-        // Leadership level: INTERMEDIATE (I) or BASIC (B). Not in the list = BASIC + a small hint.
         const level = noLeadership ? null : leadershipLevelFor(position);
         const intermediate = (level === 'I');
-        document.getElementById('lcHeadingText').textContent = intermediate ? 'Leadership Competencies' : 'Leadership Competencies';
+        document.getElementById('lcHeadingText').textContent = 'Leadership Competencies';
         document.getElementById('lcLevelLabel').textContent = intermediate ? 'Advanced' : 'Basic';
         for (let i = 1; i <= 5; i++) {
             document.getElementById('lcDesc' + i).textContent = intermediate ? LC_INTERMEDIATE[i - 1] : LC_BASIC[i - 1];
@@ -716,7 +716,6 @@ require_role(['rater', 'user']);
 
         document.querySelectorAll('tr.leadership-row').forEach(row => {
             row.classList.toggle('is-hidden', noLeadership);
-            // Hidden fields are cleared and disabled so they are not saved or counted
             row.querySelectorAll('input, select, textarea').forEach(el => {
                 if (noLeadership) el.value = '';
                 el.disabled = noLeadership;
@@ -737,8 +736,6 @@ require_role(['rater', 'user']);
         togglePositionOther();
     }
 
-    // "Others": swap the dropdown for a text box. Only one of the two is enabled,
-    // so only one "position_title" value is ever submitted.
     function togglePositionOther() {
         const sel = document.getElementById('position_title');
         const custom = document.getElementById('position_custom');
@@ -772,19 +769,16 @@ require_role(['rater', 'user']);
         togglePositionOther();
     }
 
-    // After form.reset(), restore the dropdown state and the default position list
     document.getElementById('scoringForm').addEventListener('reset', () => {
         setTimeout(() => { document.getElementById('position_custom').value = ''; updatePositionOptions(); applyFormLayout(); }, 0);
     });
 
-    // ===== Rater checkbox dropdown (keeps the order they were ticked) =====
-    let raterClickOrder = []; // labels, oldest click first
+    let raterClickOrder = [];
 
     function selectedRaters() {
         return Array.from(document.querySelectorAll('input.rater-check:checked'));
     }
 
-    // Keep only ticked boxes; anything newly ticked goes to the end
     function syncRaterOrder() {
         const checked = selectedRaters().map(c => c.dataset.label);
         raterClickOrder = raterClickOrder.filter(l => checked.includes(l));
@@ -810,25 +804,23 @@ require_role(['rater', 'user']);
     document.querySelectorAll('input.rater-check').forEach(b => b.addEventListener('change', updateRaterSummary));
     document.getElementById('scoringForm').addEventListener('reset', () => setTimeout(() => { raterClickOrder = []; updateRaterSummary(); }, 0));
     updateRaterSummary();
-    // close the dropdown when clicking anywhere else
     document.addEventListener('click', e => {
         const dd = document.getElementById('raterDropdown');
         if (dd && !dd.contains(e.target)) dd.open = false;
     });
 
-    // Secret Admin Shortcut: Hold ALT while double-clicking "INTERVIEW SCORING SHEET"
     function goToAdminResults(event) {
         if (event.altKey) {
             window.location.href = 'results_2.php';
         }
     }
 
-    // Save button: saves in the background without redirecting
     function saveOnly() {
         const form = document.getElementById('scoringForm');
         const btn  = document.getElementById('saveBtn');
 
-        updateRaterSummary(); // refresh the hidden raters_order field
+        updateRaterSummary();
+        snapPositionToCanonical();
         if (selectedRaters().length === 0) {
             alert('Please select at least one rater.');
             return;
@@ -854,7 +846,6 @@ require_role(['rater', 'user']);
         )
         .then(({ ok, data }) => {
             if (ok && data.status === 'success') {
-                // Keep the filled-in sheet on screen so it can be printed / saved as PDF
                 savedOk = true;
                 markSaved();
                 alert('Saved successfully! You can now print this sheet, or click "New Sheet" for the next one.');
@@ -866,7 +857,6 @@ require_role(['rater', 'user']);
         .finally(() => { if (!savedOk) btn.disabled = false; });
     }
 
-    // After a successful save the sheet stays visible (so it can be printed); "New Sheet" clears it
     function markSaved() {
         const btn = document.getElementById('saveBtn');
         btn.textContent = 'Saved ✓';
@@ -885,6 +875,9 @@ require_role(['rater', 'user']);
         markEdited();
         window.scrollTo(0, 0);
     }
+
+    document.getElementById('position_custom').addEventListener('blur', snapPositionToCanonical);
+    document.getElementById('position_custom').addEventListener('change', snapPositionToCanonical);
 
     applyFormLayout();
 
