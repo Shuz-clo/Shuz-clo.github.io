@@ -1,4 +1,7 @@
 <?php
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
@@ -6,7 +9,6 @@ require_once 'auth.php';
 require_admin();
 require_once __DIR__ . '/Raters.php';
 
-// Never let a browser/proxy/host cache show an old copy of the sheet after a refresh
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
@@ -37,8 +39,11 @@ if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $office = !empty($row['office_name']) ? strtoupper(trim($row['office_name'])) : 'REGIONAL OFFICE';
 
-        // Normalize the position so "Atty 5", "Atty V", "Attorney V" all collapse into one group.
-        $position = canonical_position_title((string)($row['position_title'] ?? 'LMO I'));
+        // If canonical_position_title exists, use it; otherwise fall back to raw value.
+        $rawPosition = (string)($row['position_title'] ?? 'LMO I');
+        $position = function_exists('canonical_position_title')
+            ? canonical_position_title($rawPosition)
+            : $rawPosition;
 
         if (!isset($groupedCandidates[$office])) {
             $groupedCandidates[$office] = [];
@@ -129,7 +134,7 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // sheet_settings missing fallback
+    // sheet_settings missing — use defaults above
 }
 
 function normalize_rater(string $label): ?string {
@@ -257,16 +262,9 @@ foreach ($groupedCandidates as $officeKey => $list) {
         }
         .table-container.active { display: block; }
 
-        /* Wrapper that lets the wide table scroll sideways on phones
-           instead of being squished into the viewport. */
         .table-scroll {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
-            background-image: linear-gradient(to right,
-                rgba(0,0,0,0.06) 0%,
-                rgba(0,0,0,0) 12px,
-                rgba(0,0,0,0) calc(100% - 12px),
-                rgba(0,0,0,0.06) 100%);
         }
 
         .doc-header {
@@ -298,7 +296,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .excel-table { 
             border-collapse: collapse; 
             width: 100%; 
-            min-width: 900px;         /* forces readable width; scroll instead of squish */
+            min-width: 900px;
             font-size: 11px;
             border: 2px solid #000000;
         }
@@ -376,64 +374,23 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .btn-primary { background-color: #107c41; color: #fff; border-color: #107c41; }
         .btn-primary:hover { background-color: #0b5c30; }
 
-        /* ============================================================
-           Mobile adjustments
-           ============================================================ */
         @media (max-width: 768px) {
             body { padding: 6px; font-size: 11px; }
-
-            /* Tab bar: wrap so the search box doesn't push off-screen */
-            .excel-tabs-container {
-                flex-wrap: wrap;
-                padding: 6px 6px 0 6px;
-            }
-            #tabs-bar {
-                width: 100%;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-            }
-            .excel-tab {
-                padding: 5px 10px;
-                font-size: 10px;
-            }
-            .tab-search {
-                width: 100%;
-                padding-bottom: 6px;
-            }
-            .tab-search input {
-                flex: 1;
-                width: auto;
-                font-size: 11px;
-            }
-
-            /* Less padding inside the sheet container */
+            .excel-tabs-container { flex-wrap: wrap; padding: 6px 6px 0 6px; }
+            #tabs-bar { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .excel-tab { padding: 5px 10px; font-size: 10px; }
+            .tab-search { width: 100%; padding-bottom: 6px; }
+            .tab-search input { flex: 1; width: auto; font-size: 11px; }
             .table-container { padding: 10px 8px; }
-
-            /* Smaller document header */
-            .doc-header .gov-title,
-            .doc-header .office-sub { font-size: 9px; }
+            .doc-header .gov-title, .doc-header .office-sub { font-size: 9px; }
             .doc-header .agency-title { font-size: 11px; }
             .doc-header .doc-name { font-size: 12px; }
-
-            /* Position banner: stack the two lines so they don't clip */
-            .position-banner {
-                flex-direction: column;
-                gap: 2px;
-                text-align: center;
-                font-size: 10px;
-                padding: 5px 6px;
-            }
-
-            /* Table keeps its 900px min-width; smaller font for readability */
+            .position-banner { flex-direction: column; gap: 2px; text-align: center; font-size: 10px; padding: 5px 6px; }
             .excel-table { font-size: 10px; }
             .excel-table th, .excel-table td { padding: 4px 3px; }
             .row-num-cell { width: 26px; }
-
-            /* Action bar: stack the buttons */
             .action-bar { flex-wrap: wrap; gap: 6px; }
             .btn { padding: 8px 12px; font-size: 11px; }
-
-            /* Signatories: single column */
             .signatory-section { grid-template-columns: 1fr; gap: 30px; }
         }
 
@@ -443,7 +400,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             .no-print, .excel-tabs-container, .action-bar, .rater-add { display: none !important; }
             .table-container { display: block !important; border: none; box-shadow: none; padding: 0; page-break-after: always; }
             .table-block { page-break-inside: avoid; }
-            .table-scroll { overflow: visible !important; background-image: none !important; }
+            .table-scroll { overflow: visible !important; }
             .excel-table { min-width: 0 !important; }
             .row-num-cell:hover .row-number { display: inline !important; }
             .row-num-cell:hover .delete-icon { display: none !important; }
@@ -1090,7 +1047,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 }
             });
         });
-        
     </script>
 </body>
 </html>
