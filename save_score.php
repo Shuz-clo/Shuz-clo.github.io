@@ -1,4 +1,21 @@
 <?php
+// ==== DEBUG + FATAL ERROR HANDLER ====
+// Shows real errors instead of an empty response. Remove the display_errors line once fixed.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        if (ob_get_length()) ob_clean();
+        header('Content-Type: application/json');
+        http_response_code(500);
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'FATAL: ' . $e['message'] . ' in ' . $e['file'] . ':' . $e['line']
+        ]);
+    }
+});
+
 // Buffer everything so a stray PHP warning can never corrupt the JSON reply.
 ob_start();
 
