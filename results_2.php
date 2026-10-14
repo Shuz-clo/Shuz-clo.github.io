@@ -39,7 +39,6 @@ if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $office = !empty($row['office_name']) ? strtoupper(trim($row['office_name'])) : 'REGIONAL OFFICE';
 
-        // If canonical_position_title exists, use it; otherwise fall back to raw value.
         $rawPosition = (string)($row['position_title'] ?? 'LMO I');
         $position = function_exists('canonical_position_title')
             ? canonical_position_title($rawPosition)
@@ -223,14 +222,31 @@ foreach ($groupedCandidates as $officeKey => $list) {
             font-weight: bold;
         }
 
+        /* Always-visible red circular X on every tab */
         .tab-close-btn {
-            visibility: hidden;
-            color: #a00;
+            visibility: visible;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            line-height: 1;
+            border-radius: 50%;
+            background: rgba(220, 53, 69, 0.15);
+            color: #c0392b;
             font-weight: bold;
             font-size: 13px;
-            margin-left: 4px;
+            margin-left: 6px;
+            cursor: pointer;
+            user-select: none;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s;
         }
-        .excel-tab:hover .tab-close-btn, .excel-tab.active .tab-close-btn { visibility: visible; }
+        .tab-close-btn:hover {
+            background: #c0392b;
+            color: #fff;
+        }
+        @media print { .tab-close-btn { display: none !important; } }
 
         .excel-tab-add {
             padding: 4px 10px;
@@ -392,6 +408,14 @@ foreach ($groupedCandidates as $officeKey => $list) {
             .action-bar { flex-wrap: wrap; gap: 6px; }
             .btn { padding: 8px 12px; font-size: 11px; }
             .signatory-section { grid-template-columns: 1fr; gap: 30px; }
+
+            /* Bigger tap target for the X */
+            .tab-close-btn {
+                width: 22px;
+                height: 22px;
+                font-size: 15px;
+                margin-left: 8px;
+            }
         }
 
         @media print {
@@ -732,11 +756,14 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 tabLabel.innerText = branch;
                 tab.appendChild(tabLabel);
 
+                // Always-visible red circular X
                 const closeBtn = document.createElement('span');
                 closeBtn.className = 'tab-close-btn';
                 closeBtn.innerText = '×';
+                closeBtn.title = 'Delete this tab';
                 closeBtn.onclick = (e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     deleteTab(branch);
                 };
                 tab.appendChild(closeBtn);
@@ -992,7 +1019,14 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ csrf_token: CSRF_TOKEN, candidates: candidatesToSave, columns: columnsToSave, tabs: tabsToSave, hiddenTabs: Array.from(hiddenTabs), headers: headerLabels })
             })
-            .then(res => res.json())
+            .then(res => res.text().then(text => {
+                let data;
+                try { data = JSON.parse(text); }
+                catch (e) {
+                    throw new Error('Server did not return JSON. First 300 chars: ' + text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300));
+                }
+                return data;
+            }))
             .then(data => {
                 if (data.status === 'success') {
                     if (data.savedIds) {
