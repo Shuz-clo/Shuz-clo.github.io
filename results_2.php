@@ -12,8 +12,6 @@ header('Pragma: no-cache');
 
 ensure_schema($conn);
 
-// Rater columns that were saved for each office + position, in their saved left-to-right order.
-// This is what keeps an added column on the sheet after a refresh.
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
@@ -21,7 +19,6 @@ try {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
 
-// Every rater's scores, keyed by candidate then rater name
 $scoreMap = [];
 $sr = $conn->query("SELECT candidate_id, rater, psycho, potential FROM candidate_scores");
 if ($sr) {
@@ -33,13 +30,15 @@ if ($sr) {
     }
 }
 
-// Retrieve candidates sorted by branch office and interview date
 $result = $conn->query("SELECT * FROM candidates ORDER BY office_name ASC, interview_date ASC, id ASC");
 
 $groupedCandidates = [];
 if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $office = !empty($row['office_name']) ? strtoupper(trim($row['office_name'])) : 'REGIONAL OFFICE';
+
+        // Normalize the position so "Atty 5", "Atty V", "Attorney V" all collapse into one group.
+        $position = canonical_position_title((string)($row['position_title'] ?? 'LMO I'));
 
         if (!isset($groupedCandidates[$office])) {
             $groupedCandidates[$office] = [];
@@ -57,17 +56,16 @@ if ($result && $result->num_rows > 0) {
         $groupedCandidates[$office][] = [
             'id'       => $id,
             'name'     => $row['candidate_name'],
-            'position' => $row['position_title'] ?? 'LMO I',
+            'position' => $position,
             'office'   => $office,
             'date'     => !empty($row['interview_date']) ? $row['interview_date'] : date('F d, Y'),
             'remarks'  => $row['remarks'] ?? '',
             'scores'   => isset($scoreMap[$id]) ? $scoreMap[$id] : [],
-            '_legacy'  => ['p' => $legacyP, 't' => $legacyT],   // scores saved by the older column layout
+            '_legacy'  => ['p' => $legacyP, 't' => $legacyT],
         ];
     }
 }
 
-// Default list of offices if DB is completely empty
 $defaultOffices = ['REGIONAL OFFICE', 'PENRO ILOILO', 'PENRO CAPIZ', 'PENRO AKLAN', 'PENRO ANTIQUE', 'PENRO GUIMARAS', 'PENRO NEGROS OCCIDENTAL'];
 
 $orderedOffices = [];
@@ -81,14 +79,12 @@ foreach ($groupedCandidates as $office => $list) {
 }
 $groupedCandidates = $orderedOffices;
 
-// Tabs (offices) that have saved rater columns but no candidates yet must still appear after a refresh
 foreach (array_keys($storedOrders) as $storedOffice) {
     if (!isset($groupedCandidates[$storedOffice])) {
         $groupedCandidates[$storedOffice] = [];
     }
 }
 
-// Tabs an admin deleted stay gone (unless applicants were added under that name afterwards)
 try {
     foreach (removed_tab_list($conn) as $removedOffice) {
         if (isset($groupedCandidates[$removedOffice]) && count($groupedCandidates[$removedOffice]) === 0) {
@@ -99,7 +95,6 @@ try {
     error_log('results_2 removed tabs load error: ' . $e->getMessage());
 }
 
-// Header labels
 $headerLabels = [
     'hash' => 'NO.', 'name' => 'NAME OF APPLICANT / CANDIDATE', 'psychoGroup' => 'PSYCHO-SOCIAL ATTRIBUTES', 'potentialGroup' => 'POTENTIAL ATTRIBUTES',
     'core' => 'CORE', 'org' => 'ORG', 'psychoExtra1' => 'R1', 'psychoExtra2' => 'R2', 'psychoExtra3' => 'R3', 'psychoExtra4' => 'R4',
@@ -134,10 +129,9 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // Table sheet_settings not found fallback
+    // sheet_settings missing fallback
 }
 
-// Rows saved before raters had their own columns: use the old column labels (ADMIN, END-USER, ...) to place their scores
 function normalize_rater(string $label): ?string {
     $l = strtoupper(trim($label));
     $l = preg_replace('/[\s_]+/', '-', $l);
@@ -180,7 +174,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             font-size: 12px;
         }
 
-        /* Excel Toolbar & Tabs */
         .excel-tabs-container {
             display: flex;
             align-items: flex-end;
@@ -254,7 +247,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             width: 180px;
         }
 
-        /* Container & Excel Page Worksheet */
         .table-container { 
             display: none; 
             background: #ffffff;
@@ -265,7 +257,18 @@ foreach ($groupedCandidates as $officeKey => $list) {
         }
         .table-container.active { display: block; }
 
-        /* Excel Document Header */
+        /* Wrapper that lets the wide table scroll sideways on phones
+           instead of being squished into the viewport. */
+        .table-scroll {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            background-image: linear-gradient(to right,
+                rgba(0,0,0,0.06) 0%,
+                rgba(0,0,0,0) 12px,
+                rgba(0,0,0,0) calc(100% - 12px),
+                rgba(0,0,0,0.06) 100%);
+        }
+
         .doc-header {
             text-align: center;
             margin-bottom: 15px;
@@ -277,7 +280,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .doc-header .office-sub { font-size: 11px; font-weight: bold; color: #222; }
         .doc-header .doc-name { font-size: 14px; font-weight: 800; color: #107c41; margin-top: 5px; text-decoration: underline; }
 
-        /* Excel Table Grid Styling */
         .table-block { margin-bottom: 30px; }
         
         .position-banner {
@@ -296,6 +298,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .excel-table { 
             border-collapse: collapse; 
             width: 100%; 
+            min-width: 900px;         /* forces readable width; scroll instead of squish */
             font-size: 11px;
             border: 2px solid #000000;
         }
@@ -307,7 +310,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             vertical-align: middle;
         }
 
-        /* Color Fills matching Excel */
         .meta-row { background-color: #f2f2f2; font-weight: bold; }
         .header-psycho { background-color: #e2efda; font-weight: bold; color: #276a3c; }
         .header-potential { background-color: #fff2cc; font-weight: bold; color: #7f6000; }
@@ -315,7 +317,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         
         .col-green-ave { background-color: #c6e0b4; font-weight: bold; }
         .col-yellow-ave { background-color: #ffe699; font-weight: bold; }
-        /* header cells must out-rank ".sub-header th" (white) or the AVE. headers stay white */
         .sub-header th.col-green-ave  { background-color: #c6e0b4; }
         .sub-header th.col-yellow-ave { background-color: #ffe699; }
         .rater-remove { cursor: pointer; color: #c0392b; font-weight: bold; margin-left: 3px; opacity: .55; }
@@ -326,7 +327,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .text-left { text-align: left !important; padding-left: 8px !important; }
         .remarks-cell { min-width: 140px; text-align: left; }
 
-        /* Editable styling */
         th[contenteditable="true"], td[contenteditable="true"] { outline: none; cursor: cell; }
         th[contenteditable="true"]:focus, td[contenteditable="true"]:focus {
             outline: 2px solid #107c41 !important;
@@ -343,7 +343,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .delete-icon { display: none; color: #d9534f; font-weight: bold; font-size: 14px; }
         .row-num-cell:hover .delete-icon { display: inline; }
 
-        /* Signatory Section */
         .signatory-section {
             margin-top: 35px;
             display: grid;
@@ -356,7 +355,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .sig-title { font-weight: bold; margin-top: 4px; font-size: 11px; }
         .sig-sub { font-size: 10px; color: #555; }
 
-        /* Action Buttons */
         .action-bar {
             margin-top: 15px;
             display: flex;
@@ -378,13 +376,75 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .btn-primary { background-color: #107c41; color: #fff; border-color: #107c41; }
         .btn-primary:hover { background-color: #0b5c30; }
 
-        /* Print Settings for Exact Excel Look on Paper/PDF */
+        /* ============================================================
+           Mobile adjustments
+           ============================================================ */
+        @media (max-width: 768px) {
+            body { padding: 6px; font-size: 11px; }
+
+            /* Tab bar: wrap so the search box doesn't push off-screen */
+            .excel-tabs-container {
+                flex-wrap: wrap;
+                padding: 6px 6px 0 6px;
+            }
+            #tabs-bar {
+                width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .excel-tab {
+                padding: 5px 10px;
+                font-size: 10px;
+            }
+            .tab-search {
+                width: 100%;
+                padding-bottom: 6px;
+            }
+            .tab-search input {
+                flex: 1;
+                width: auto;
+                font-size: 11px;
+            }
+
+            /* Less padding inside the sheet container */
+            .table-container { padding: 10px 8px; }
+
+            /* Smaller document header */
+            .doc-header .gov-title,
+            .doc-header .office-sub { font-size: 9px; }
+            .doc-header .agency-title { font-size: 11px; }
+            .doc-header .doc-name { font-size: 12px; }
+
+            /* Position banner: stack the two lines so they don't clip */
+            .position-banner {
+                flex-direction: column;
+                gap: 2px;
+                text-align: center;
+                font-size: 10px;
+                padding: 5px 6px;
+            }
+
+            /* Table keeps its 900px min-width; smaller font for readability */
+            .excel-table { font-size: 10px; }
+            .excel-table th, .excel-table td { padding: 4px 3px; }
+            .row-num-cell { width: 26px; }
+
+            /* Action bar: stack the buttons */
+            .action-bar { flex-wrap: wrap; gap: 6px; }
+            .btn { padding: 8px 12px; font-size: 11px; }
+
+            /* Signatories: single column */
+            .signatory-section { grid-template-columns: 1fr; gap: 30px; }
+        }
+
         @media print {
             @page { size: landscape; margin: 0.4in; }
             body { background: #fff; padding: 0; }
             .no-print, .excel-tabs-container, .action-bar, .rater-add { display: none !important; }
             .table-container { display: block !important; border: none; box-shadow: none; padding: 0; page-break-after: always; }
             .table-block { page-break-inside: avoid; }
+            .table-scroll { overflow: visible !important; background-image: none !important; }
+            .excel-table { min-width: 0 !important; }
             .row-num-cell:hover .row-number { display: inline !important; }
             .row-num-cell:hover .delete-icon { display: none !important; }
         }
@@ -392,7 +452,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
 </head>
 <body>
 
-    <!-- Excel Tab Bar Header -->
     <div class="excel-tabs-container">
         <div id="tabs-bar"></div>
         <div class="tab-search">
@@ -401,10 +460,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         </div>
     </div>
 
-    <!-- Main Sheets Wrapper -->
     <div id="tables-wrapper"></div>
 
-    <!-- Controls Toolbar -->
     <div class="action-bar no-print">
         <button type="button" class="btn btn-primary" onclick="saveWholeTable(event)">💾 Save All Changes</button>
         <button type="button" class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
@@ -417,12 +474,12 @@ foreach ($groupedCandidates as $officeKey => $list) {
         let headerLabels = <?php echo json_encode($headerLabels, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         let activeTabOffice = 'REGIONAL OFFICE';
         const RATERS = <?php echo json_encode(rater_list(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
-        const MIN_SLOTS = 7;               // rater columns shown per group (blank ones stay empty, like the Excel sheet)
+        const MIN_SLOTS = 7;
         const CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;
-        const hiddenTabs = new Set();      // built-in tabs that were renamed away from; hidden permanently on the next save
-        let skipNextSync = false;          // set when a column was just removed, so the redraw doesn't re-read it from the old table
-        const addedRaters = {};            // rater columns added in this browser session (saved to the database on Save All Changes)
-        const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>; // saved columns: office -> position -> [raters]
+        const hiddenTabs = new Set();
+        let skipNextSync = false;
+        const addedRaters = {};
+        const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         function escapeHtml(str) {
             return String(str ?? '').replace(/[&<>"']/g, ch => ({
@@ -449,8 +506,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
 
         function blockKey(office, position, date) { return office + '|' + position + '|' + date; }
 
-        // A table shows: the columns saved in the database for this office + position (in saved order),
-        // then any added this session (in click order), then any other rater that has a score in it.
         function raterColumns(cands, key, office, position) {
             const stored = ((storedOrders[office] || {})[position]) || [];
             const added = addedRaters[key] || [];
@@ -563,14 +618,16 @@ foreach ($groupedCandidates as $officeKey => $list) {
                         <span>POSITION TITLE: ${escapeHtml(posKey)}</span>
                         <span>OFFICE: ${escapeHtml(branch)}</span>
                     </div>
-                    <table class="excel-table">
-                        <thead>
-                            ${buildTableHeaderHtml(currentDate, branch, cols, slots, free)}
-                        </thead>
-                        <tbody class="scores-body" data-cols="${escapeHtml(JSON.stringify(cols))}" data-slots="${slots}">
-                            ${rowsHtml}
-                        </tbody>
-                    </table>
+                    <div class="table-scroll">
+                        <table class="excel-table">
+                            <thead>
+                                ${buildTableHeaderHtml(currentDate, branch, cols, slots, free)}
+                            </thead>
+                            <tbody class="scores-body" data-cols="${escapeHtml(JSON.stringify(cols))}" data-slots="${slots}">
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             `;
         }
@@ -610,7 +667,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
         }
 
-        // ---- read the sheet back from the screen ----
         function readDate(block) {
             const el = block.querySelector('[data-field="interview_date"]');
             const t = el ? el.innerText.replace('DATE OF INTERVIEW:', '').replace(/[\r\n\t]/g, ' ').trim() : '';
@@ -645,7 +701,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             return out;
         }
 
-        // keep unsaved typing when the page redraws (switching tabs, adding a rater column, ...)
         function syncFromDom() {
             const containers = document.querySelectorAll('.table-container');
             if (!containers.length) return;
@@ -674,7 +729,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             renderAll();
         }
 
-        // Remove a rater column from every table of this office + position. Takes effect in the database on Save All Changes.
         function removeRater(el) {
             const r = el.getAttribute('data-rater');
             const block = el.closest('.table-block');
@@ -682,7 +736,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             const position = block.getAttribute('data-position') || 'UNASSIGNED';
             if (!confirm('Remove the "' + r + '" column for position "' + position + '"?\n\nIts scores will be deleted when you click Save All Changes.')) return;
 
-            syncFromDom(); // keep anything typed but not saved yet
+            syncFromDom();
             (groupedData[office] || []).forEach(c => {
                 const pos = (c.position && c.position.trim() !== '') ? c.position.trim() : 'UNASSIGNED';
                 if (pos === position && c.scores) delete c.scores[r];
@@ -737,7 +791,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 container.className = `table-container ${branch === activeTabOffice ? 'active' : ''}`;
                 container.setAttribute('data-office', branch);
 
-                // Add Official Document Header inside each sheet
                 let docHeaderHtml = `
                     <div class="doc-header">
                         <div class="gov-title">Republic of the Philippines</div>
@@ -829,7 +882,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         }
 
         function deleteTab(branch) {
-            syncFromDom(); // include anything typed but not saved yet
+            syncFromDom();
             const saved = (groupedData[branch] || []).filter(c => c.id > 0).length;
             const msg = saved > 0
                 ? `Delete the "${branch}" tab?\n\nThis permanently deletes ${saved} saved applicant(s) and all of their scores from the database.`
@@ -962,7 +1015,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 };
             });
 
-            // Every rater column currently on screen, even ones with no scores typed yet
             const columnsToSave = [];
             document.querySelectorAll('.table-container').forEach(container => {
                 const office = container.getAttribute('data-office') || 'REGIONAL OFFICE';
@@ -975,7 +1027,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 });
             });
 
-            // Every tab (office) currently on screen
             const tabsToSave = Array.from(document.querySelectorAll('.table-container'))
                 .map(c => c.getAttribute('data-office')).filter(Boolean);
 
