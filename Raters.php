@@ -7,7 +7,9 @@ if (!function_exists('rater_list')) {
     }
 }
 
-// Adds a column to a table only if it isn't already there.
+// Adds a column to a table only if it isn't already there. Safe to call even
+// if the table itself doesn't exist yet (just does nothing in that case),
+// which matters because db.php runs mysqli in strict exception mode.
 function ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
     try {
         $exists = $conn->query("SELECT 1 FROM information_schema.COLUMNS
@@ -17,11 +19,11 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
             $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definitionSql");
         }
     } catch (Exception $e) {
-        // Table doesn't exist yet
+        // Table doesn't exist (yet) — nothing to add a column to.
     }
 }
 
-// Creates what the scoring needs if it is not there yet.
+// Creates what the scoring needs if it is not there yet (safe to run every time)
 function ensure_schema(mysqli $conn): void {
     $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
       `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -120,7 +122,6 @@ function record_rater_order(mysqli $conn, string $office, string $position, arra
     $ins->close();
 }
 
-// Returns the stored rater order for one office+position.
 function position_rater_order(mysqli $conn, string $office, string $position): array {
     $office   = strtoupper(trim($office));
     $position = canonical_position_title(trim($position));
@@ -137,7 +138,6 @@ function position_rater_order(mysqli $conn, string $office, string $position): a
     return $out;
 }
 
-// Returns stored orders for every office+position pair.
 function all_position_rater_orders(mysqli $conn): array {
     $out = [];
     $res = $conn->query("SELECT office, position, rater FROM position_rater_order ORDER BY office, position, sort_order ASC");
@@ -149,7 +149,6 @@ function all_position_rater_orders(mysqli $conn): array {
     return $out;
 }
 
-// Returns the (upper-case) names of tabs an admin has deleted.
 function removed_tab_list(mysqli $conn): array {
     $out = [];
     $res = $conn->query("SELECT office FROM removed_tabs");
@@ -172,10 +171,13 @@ function offices_without_leadership(): array {
     return [];
 }
 
+// Canonicalize before checking so "svems" and "SVEMS" behave the same.
 function office_has_leadership(string $office, string $position = ''): bool {
     if (in_array(strtoupper(trim($office)), offices_without_leadership(), true)) return false;
+    $canonical = canonical_position_title($position);
     if (in_array(strtoupper(trim($position)), leadership_hidden_positions(), true)) return false;
-    return leadership_level_for_position($position) !== null;
+    if (in_array(strtoupper(trim($canonical)), leadership_hidden_positions(), true)) return false;
+    return leadership_level_for_position($canonical) !== null;
 }
 
 function core_cell_codes(): array {
@@ -199,6 +201,7 @@ function cell_avg(array $cells, array $codes): ?float {
 
 // ===================== Leadership LEVEL =====================
 // The list below is the COMPLETE set of positions that get a Leadership section.
+// I = INTERMEDIATE, B = BASIC. KEEP IN SYNC with LEADERSHIP_LEVELS in index.php.
 function leadership_level_titles(): array {
     return [
         // --- INTERMEDIATE (I) ---
@@ -239,7 +242,7 @@ function leadership_level_titles(): array {
     ];
 }
 
-// Short forms people may type.
+// Short forms. KEEP IN SYNC with LEADERSHIP_ALIASES in index.php.
 function leadership_level_aliases(): array {
     return [
         ['ATY','V','I'], ['ATY','IV','B'], ['ATY','III','B'], ['ATY','II','B'],
@@ -269,6 +272,15 @@ function compact_position_no_parens(string $s): string {
     return compact_position((string)preg_replace('/\([^)]*\)/u', ' ', $s));
 }
 
+// Roman <-> digit maps used everywhere
+function numeral_to_digit_map(): array {
+    return ['II' => '2', 'III' => '3', 'IV' => '4', 'V' => '5'];
+}
+function digit_to_numeral_map(): array {
+    return ['2' => 'II', '3' => 'III', '4' => 'IV', '5' => 'V'];
+}
+
+// compact title / short form => 'I' or 'B'. Registers BOTH Roman and digit alias forms.
 function leadership_level_map(): array {
     static $map = null;
     if ($map !== null) return $map;
@@ -281,13 +293,13 @@ function leadership_level_map(): array {
         $base = compact_position_no_parens($title);
         if (!isset($map[$base])) $map[$base] = $lvl;
     }
-    // Roman AND digit forms both register.
-    $romanToDigit = ['II' => '2', 'III' => '3', 'IV' => '4', 'V' => '5'];
-    $digitToRoman = ['2' => 'II', '3' => 'III', '4' => 'IV', '5' => 'V'];
+
+    $r2d = numeral_to_digit_map();
+    $d2r = digit_to_numeral_map();
     foreach (leadership_level_aliases() as [$abbr, $numeral, $lvl]) {
         $keys = [$abbr . $numeral];
-        if ($numeral !== '' && isset($romanToDigit[$numeral])) $keys[] = $abbr . $romanToDigit[$numeral];
-        if ($numeral !== '' && isset($digitToRoman[$numeral])) $keys[] = $abbr . $digitToRoman[$numeral];
+        if ($numeral !== '' && isset($r2d[$numeral])) $keys[] = $abbr . $r2d[$numeral];
+        if ($numeral !== '' && isset($d2r[$numeral])) $keys[] = $abbr . $d2r[$numeral];
         foreach ($keys as $k) {
             if (!isset($map[$k])) $map[$k] = $lvl;
         }
@@ -307,54 +319,53 @@ function leadership_level_for_position(string $position): ?string {
 
 
 // ===================== Canonical position title =====================
-// Maps any user-typed variant ("atty 5", "Atty V", "ATTY-5", ...) to the exact
-// title from leadership_level_titles(). Unknown positions are returned unchanged.
-if (!function_exists('canonical_position_title')) {
-    function canonical_position_title(string $position): string {
-        static $titleByCompact = null;
-        static $titleByCompactNoParens = null;
-        static $aliasToTitle = null;
+// Maps any typed variant — "atty 5", "ATTY-5", "Attorney V", "plo iii", "PLO3",
+// "svems", "PENRO" — to the exact title from leadership_level_titles().
+// Unknown positions are returned unchanged (trimmed).
+function canonical_position_title(string $position): string {
+    static $titleByCompact = null;
+    static $titleByCompactNoParens = null;
+    static $aliasToTitle = null;
 
-        if ($titleByCompact === null) {
-            $titleByCompact = [];
-            $titleByCompactNoParens = [];
-            foreach (leadership_level_titles() as $title => $lvl) {
-                $titleByCompact[compact_position($title)] = $title;
-                $cp = compact_position_no_parens($title);
-                if (!isset($titleByCompactNoParens[$cp])) $titleByCompactNoParens[$cp] = $title;
-            }
-            $digits = ['II' => '2', 'III' => '3', 'IV' => '4', 'V' => '5'];
-            $aliasToTitle = [];
-            foreach (leadership_level_aliases() as [$abbr, $numeral, $lvl]) {
-                foreach (leadership_level_titles() as $title => $titleLvl) {
-                    if ($titleLvl !== $lvl) continue;
-                    $ct = compact_position($title);
-                    if (strpos($ct, $abbr) !== 0) continue;
-                    if ($numeral !== '' && !preg_match('/' . preg_quote($numeral, '/') . '$/', $ct)) continue;
-                    $keys = [$abbr . $numeral];
-                    if ($numeral !== '' && isset($digits[$numeral])) $keys[] = $abbr . $digits[$numeral];
-                    $rev = array_search($numeral, $digits, true);
-                    if ($numeral !== '' && $rev !== false) $keys[] = $abbr . $rev;
-                    foreach ($keys as $k) {
-                        if (!isset($aliasToTitle[$k])) $aliasToTitle[$k] = $title;
-                    }
-                    break;
+    if ($titleByCompact === null) {
+        $titleByCompact = [];
+        $titleByCompactNoParens = [];
+        foreach (leadership_level_titles() as $title => $lvl) {
+            $titleByCompact[compact_position($title)] = $title;
+            $cp = compact_position_no_parens($title);
+            if (!isset($titleByCompactNoParens[$cp])) $titleByCompactNoParens[$cp] = $title;
+        }
+        $r2d = numeral_to_digit_map();
+        $d2r = digit_to_numeral_map();
+        $aliasToTitle = [];
+        foreach (leadership_level_aliases() as [$abbr, $numeral, $lvl]) {
+            foreach (leadership_level_titles() as $title => $titleLvl) {
+                if ($titleLvl !== $lvl) continue;
+                $ct = compact_position($title);
+                if (strpos($ct, $abbr) !== 0) continue;
+                if ($numeral !== '' && !preg_match('/' . preg_quote($numeral, '/') . '$/', $ct)) continue;
+                $keys = [$abbr . $numeral];
+                if ($numeral !== '' && isset($r2d[$numeral])) $keys[] = $abbr . $r2d[$numeral];
+                if ($numeral !== '' && isset($d2r[$numeral])) $keys[] = $abbr . $d2r[$numeral];
+                foreach ($keys as $k) {
+                    if (!isset($aliasToTitle[$k])) $aliasToTitle[$k] = $title;
                 }
+                break;
             }
         }
-
-        $raw = trim($position);
-        if ($raw === '') return '';
-
-        $full = compact_position($raw);
-        if (isset($titleByCompact[$full])) return $titleByCompact[$full];
-
-        $base = compact_position_no_parens($raw);
-        if (isset($titleByCompactNoParens[$base])) return $titleByCompactNoParens[$base];
-
-        if (isset($aliasToTitle[$full])) return $aliasToTitle[$full];
-        if (isset($aliasToTitle[$base])) return $aliasToTitle[$base];
-
-        return $raw;
     }
+
+    $raw = trim($position);
+    if ($raw === '') return '';
+
+    $full = compact_position($raw);
+    if (isset($titleByCompact[$full])) return $titleByCompact[$full];
+
+    $base = compact_position_no_parens($raw);
+    if (isset($titleByCompactNoParens[$base])) return $titleByCompactNoParens[$base];
+
+    if (isset($aliasToTitle[$full])) return $aliasToTitle[$full];
+    if (isset($aliasToTitle[$base])) return $aliasToTitle[$base];
+
+    return $raw;
 }
