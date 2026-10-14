@@ -1,7 +1,7 @@
 <?php
 require_once 'db.php';
-require_once __DIR__ . '/AuthSchema.php'; // verify_csrf() lives here
-require_once 'auth.php';                  // session, login check, submit cooldown
+require_once __DIR__ . '/AuthSchema.php';
+require_once 'auth.php';
 require_once __DIR__ . '/Raters.php';
 
 $wantsJson = strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
@@ -20,12 +20,11 @@ function respond(bool $ok, string $message, int $code, bool $wantsJson): void {
     exit;
 }
 
-// index.php is login-only, so this endpoint is too
 if (!is_logged_in()) {
     respond(false, 'Please log in again.', 401, $wantsJson);
 }
 
-refresh_session_user(); // re-reads the account from the database, so a removed account loses access immediately
+refresh_session_user();
 ensure_schema($conn);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -36,12 +35,10 @@ if (!verify_csrf($_POST['csrf_token'] ?? null)) {
     respond(false, 'Your session expired. Please refresh the page.', 403, $wantsJson);
 }
 
-// Honeypot: real users never fill this hidden field
 if (!empty($_POST['website'])) {
     respond(true, 'Saved.', 200, $wantsJson);
 }
 
-// Cooldown: 5 seconds between submissions per browser session
 if (isset($_SESSION['last_submit']) && (time() - $_SESSION['last_submit']) < 5) {
     respond(false, 'Please wait a few seconds before submitting again.', 429, $wantsJson);
 }
@@ -52,7 +49,10 @@ $allowedOffices = [
 ];
 
 $candidate_name = mb_substr(trim($_POST['candidate_name'] ?? ''), 0, 255);
-$position_title = mb_substr(trim($_POST['position_title'] ?? ''), 0, 255);
+
+// ✅ Canonicalize the position so "atty 5", "ATTY-5", "Attorney V" all save as "Attorney V"
+$position_title = canonical_position_title(mb_substr(trim($_POST['position_title'] ?? ''), 0, 255));
+
 $office_name    = trim($_POST['office_name'] ?? '');
 $interview_date = mb_substr(trim($_POST['interview_date'] ?? ''), 0, 100);
 $rater_name     = mb_substr(trim($_POST['rater_name'] ?? ''), 0, 255);
@@ -67,10 +67,6 @@ if (!in_array($office_name, $allowedOffices, true)) {
     respond(false, 'Please select a valid office.', 422, $wantsJson);
 }
 
-// --- Which raters were picked, in the order they were checked ---
-// index.php sends raters_order="CHIEF,ADMIN" (built client-side from click order).
-// Any checked raters[] values not in it are appended afterwards (DOM order),
-// so the form still works even if JS failed to set the hidden field.
 $validRaters    = rater_list();
 $selectedRaters = [];
 
@@ -115,7 +111,6 @@ foreach ($groups as $codes) {
     }
 }
 
-// No leadership for this position/office (e.g. SVEMS): ignore any leadership values the browser sent
 $hasLeadership = office_has_leadership($office_name, $position_title);
 if (!$hasLeadership) {
     foreach (['lc1', 'lc2', 'lc3', 'lc4', 'lc5'] as $lc) {
@@ -137,16 +132,11 @@ $org_avg  = groupAvg($groups['org'],  $ratings);
 $lead_avg = groupAvg($groups['lead'], $ratings);
 $func_avg = groupAvg($groups['func'], $ratings);
 
-// The two scores recorded under EVERY rater that was ticked on the form (each rater's own cell):
-//   psycho    = average of CC1..CC5                                   (max 10)
-//   potential = average of OC1..OC5, LC1..LC5 (if shown), PCP1..PCO4  (max 10)
-// They stay separate - no total is calculated.
 $psycho_score    = cell_avg($ratings, core_cell_codes());
 $potential_score = cell_avg($ratings, right_cell_codes($hasLeadership));
 
 $evidenceJson = count($evidence) > 0 ? json_encode($evidence, JSON_UNESCAPED_UNICODE) : null;
 
-// Build the INSERT from fixed column lists (no user input in column names)
 $columns = ['candidate_name', 'position_title', 'office_location', 'office_name', 'interview_date', 'rater_name',
             'core_avg', 'org_avg', 'lead_avg', 'func_avg', 'evidence_json', 'psycho_ave', 'potential_ave'];
 $values  = [$candidate_name, $position_title, $office_name, $office_name, $interview_date, $rater_name,
@@ -165,8 +155,6 @@ $sql = "INSERT INTO candidates (" . implode(',', $columns) . ") VALUES ($placeho
 try {
     $conn->begin_transaction();
 
-    // Same applicant (name + office + position) already on the sheet? Then add this rating to that row,
-    // so each rater ends up in their own column on ONE row instead of creating a duplicate applicant.
     $find = $conn->prepare("SELECT id FROM candidates
         WHERE candidate_name = ? AND UPPER(TRIM(office_name)) = UPPER(?) AND TRIM(position_title) = ?
         ORDER BY id DESC LIMIT 1 FOR UPDATE");
@@ -185,8 +173,6 @@ try {
         $stmt->close();
     }
 
-    // Each ticked rater gets their own psycho + potential cell. ON DUPLICATE KEY only replaces THAT rater's
-    // own scores (candidate_id + rater is unique), so other raters' scores are never touched.
     $stmtScore = $conn->prepare("INSERT INTO candidate_scores (candidate_id, rater, psycho, potential)
         VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE psycho = VALUES(psycho), potential = VALUES(potential)");
@@ -196,7 +182,6 @@ try {
     }
     $stmtScore->close();
 
-    // Keep the column order already saved for this office + position; append only new raters
     $existing = position_rater_order($conn, $office_name, $position_title);
     $merged   = array_values(array_unique(array_merge($existing, $selectedRaters)));
     record_rater_order($conn, $office_name, $position_title, $merged);
