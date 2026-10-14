@@ -1,5 +1,4 @@
 <?php
-// Buffer everything so a stray PHP warning can never corrupt the JSON reply.
 ob_start();
 
 require_once 'db.php';
@@ -63,9 +62,9 @@ try {
         $name      = mb_substr(trim($c['name'] ?? ''), 0, 255);
         $office    = mb_substr(trim($c['office'] ?? 'General Branch'), 0, 255);
 
-        // Canonicalize the position so "atty 5" and "Attorney V" store as the same title
-        $position  = canonical_position_title(mb_substr(trim($c['position'] ?? ''), 0, 255));
+        $position  = mb_substr(trim($c['position'] ?? ''), 0, 255);
         if ($position === '') $position = 'UNASSIGNED';
+        $position  = canonical_position_title($position);
 
         $remarks   = mb_substr(trim($c['remarks'] ?? ''), 0, 2000);
 
@@ -110,9 +109,6 @@ try {
         }
     }
 
-    // =====================================================================
-    // Delete entire position tables the user removed from the results page
-    // =====================================================================
     $deletedPositions = 0;
     if (isset($data['positionsToDelete']) && is_array($data['positionsToDelete'])) {
         $stmtDelScores = $conn->prepare("DELETE cs FROM candidate_scores cs
@@ -144,15 +140,15 @@ try {
         $stmtDelOrder->close();
     }
 
-    // Rater columns on screen (including empty ones), merged per office + position.
     $savedColumns = 0;
     if (isset($data['columns']) && is_array($data['columns'])) {
         $mergedCols = [];
         foreach ($data['columns'] as $col) {
             if (!is_array($col)) continue;
             $colOffice   = strtoupper(mb_substr(trim((string)($col['office'] ?? '')), 0, 100));
-            $colPosition = canonical_position_title(mb_substr(trim((string)($col['position'] ?? '')), 0, 255));
+            $colPosition = mb_substr(trim((string)($col['position'] ?? '')), 0, 255);
             if ($colPosition === '') $colPosition = 'UNASSIGNED';
+            $colPosition = canonical_position_title($colPosition);
             if ($colOffice === '' || !is_array($col['raters'] ?? null)) continue;
 
             $k = $colOffice . "\0" . $colPosition;
@@ -182,7 +178,6 @@ try {
         }
     }
 
-    // Tabs that were deleted or renamed on screen
     $tabList = [];
     if (isset($data['tabs']) && is_array($data['tabs'])) {
         foreach (array_slice($data['tabs'], 0, 200) as $t) {
