@@ -1,7 +1,4 @@
 <?php
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
-
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
@@ -14,12 +11,30 @@ header('Pragma: no-cache');
 
 ensure_schema($conn);
 
+// Rater columns that were saved for each office + position, in their saved left-to-right order.
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
 } catch (Exception $e) {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
+
+// Canonicalize stored-order keys so "Atty 5" and "Attorney V" collapse into one key
+$canonicalStoredOrders = [];
+foreach ($storedOrders as $off => $positions) {
+    foreach ($positions as $pos => $raters) {
+        $canonicalPos = canonical_position_title($pos);
+        if (!isset($canonicalStoredOrders[$off][$canonicalPos])) {
+            $canonicalStoredOrders[$off][$canonicalPos] = [];
+        }
+        foreach ($raters as $r) {
+            if (!in_array($r, $canonicalStoredOrders[$off][$canonicalPos], true)) {
+                $canonicalStoredOrders[$off][$canonicalPos][] = $r;
+            }
+        }
+    }
+}
+$storedOrders = $canonicalStoredOrders;
 
 $scoreMap = [];
 $sr = $conn->query("SELECT candidate_id, rater, psycho, potential FROM candidate_scores");
@@ -39,10 +54,8 @@ if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $office = !empty($row['office_name']) ? strtoupper(trim($row['office_name'])) : 'REGIONAL OFFICE';
 
-        $rawPosition = (string)($row['position_title'] ?? 'LMO I');
-        $position = function_exists('canonical_position_title')
-            ? canonical_position_title($rawPosition)
-            : $rawPosition;
+        // Canonicalize on load — so old "Atty 5" rows display as "Attorney V"
+        $position = canonical_position_title((string)($row['position_title'] ?? 'LMO I'));
 
         if (!isset($groupedCandidates[$office])) {
             $groupedCandidates[$office] = [];
@@ -133,7 +146,7 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // sheet_settings missing — use defaults
+    // fall back to defaults
 }
 
 function normalize_rater(string $label): ?string {
@@ -222,7 +235,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             font-weight: bold;
         }
 
-        /* Always-visible red X on tabs */
+        /* Always-visible red circular X on every tab */
         .tab-close-btn {
             visibility: visible;
             display: inline-flex;
@@ -240,6 +253,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             cursor: pointer;
             user-select: none;
             flex-shrink: 0;
+            transition: background 0.15s, color 0.15s;
         }
         .tab-close-btn:hover {
             background: #c0392b;
@@ -308,7 +322,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             align-items: center;
             gap: 10px;
         }
-
         .position-banner .banner-left { flex: 1; min-width: 0; }
         .position-banner .banner-right {
             display: flex;
@@ -317,7 +330,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             flex-shrink: 0;
         }
 
-        /* The red delete-position button on the green banner */
+        /* Red delete-position button on the green banner */
         .pos-delete-btn {
             background: rgba(255, 255, 255, 0.2);
             color: #fff;
@@ -340,7 +353,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             border-color: #c0392b;
             transform: scale(1.05);
         }
-        @media print { .pos-delete-btn { display: none !important; } }
 
         .excel-table { 
             border-collapse: collapse; 
@@ -368,7 +380,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .sub-header th.col-yellow-ave { background-color: #ffe699; }
         .rater-remove { cursor: pointer; color: #c0392b; font-weight: bold; margin-left: 3px; opacity: .55; }
         .rater-remove:hover { opacity: 1; }
-        @media print { .rater-remove { display: none !important; } }
         .rater-add { border: 1px dashed #888; background: #fff; font-size: 10px; width: 100%; cursor: pointer; }
 
         .text-left { text-align: left !important; padding-left: 8px !important; }
@@ -448,7 +459,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         @media print {
             @page { size: landscape; margin: 0.4in; }
             body { background: #fff; padding: 0; }
-            .no-print, .excel-tabs-container, .action-bar, .rater-add { display: none !important; }
+            .no-print, .excel-tabs-container, .action-bar, .rater-add,
+            .pos-delete-btn, .tab-close-btn, .rater-remove { display: none !important; }
             .table-container { display: block !important; border: none; box-shadow: none; padding: 0; page-break-after: always; }
             .table-block { page-break-inside: avoid; }
             .table-scroll { overflow: visible !important; }
@@ -489,7 +501,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const addedRaters = {};
         const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
-        // Positions to permanently delete when Save All Changes is clicked
+        // Positions to permanently delete on next Save All Changes
         window.__positionsToDelete = window.__positionsToDelete || [];
 
         function escapeHtml(str) {
@@ -622,7 +634,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
 
             const positionAttr = posKey ? ` data-position="${escapeHtml(posKey)}"` : '';
-            // Escape for use inside an inline onclick attribute
             const escOffice = escapeHtml(branch).replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const escPos = escapeHtml(posKey).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
@@ -785,16 +796,13 @@ foreach ($groupedCandidates as $officeKey => $list) {
             const msg = savedCount > 0
                 ? `Delete the entire "${position}" table for ${office}?\n\nThis will remove ${savedCount} saved applicant(s) and all of their scores, plus every rater column for this position.`
                 : `Delete the entire "${position}" table for ${office}?`;
-
             if (!confirm(msg)) return;
 
-            // 1) Remove from the in-memory grouped data
             groupedData[office] = list.filter(c => {
                 const pos = (c.position && c.position.trim() !== '') ? c.position.trim() : 'UNASSIGNED';
                 return pos !== position;
             });
 
-            // 2) Remove any rater-column overrides for this position
             if (storedOrders[office] && storedOrders[office][position]) {
                 delete storedOrders[office][position];
             }
@@ -802,10 +810,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 if (k.indexOf(office + '|' + position + '|') === 0) delete addedRaters[k];
             });
 
-            // 3) Queue for permanent deletion on the server (sent on next Save All Changes)
             window.__positionsToDelete.push({ office: office, position: position });
 
-            // 4) Redraw
             skipNextSync = true;
             renderAll();
 
