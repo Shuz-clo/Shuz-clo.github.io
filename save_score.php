@@ -1,21 +1,4 @@
 <?php
-// ==== DEBUG + FATAL ERROR HANDLER ====
-// Shows real errors instead of an empty response. Remove the display_errors line once fixed.
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-register_shutdown_function(function () {
-    $e = error_get_last();
-    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
-        if (ob_get_length()) ob_clean();
-        header('Content-Type: application/json');
-        http_response_code(500);
-        echo json_encode([
-            'status'  => 'error',
-            'message' => 'FATAL: ' . $e['message'] . ' in ' . $e['file'] . ':' . $e['line']
-        ]);
-    }
-});
-
 // Buffer everything so a stray PHP warning can never corrupt the JSON reply.
 ob_start();
 
@@ -72,18 +55,18 @@ try {
         ON DUPLICATE KEY UPDATE psycho = VALUES(psycho), potential = VALUES(potential)");
 
     $savedIds = [];
-    // Column order per office+position, built from what's currently shown on screen
-    $orderByPosition = []; // "OFFICE\u0000Position" => [rater, rater, ...]
+    $orderByPosition = [];
 
     foreach ($data['candidates'] as $c) {
         $id        = (int)($c['id'] ?? 0);
         $tempIndex = (int)($c['tempIndex'] ?? 0);
         $name      = mb_substr(trim($c['name'] ?? ''), 0, 255);
         $office    = mb_substr(trim($c['office'] ?? 'General Branch'), 0, 255);
-        $position  = mb_substr(trim($c['position'] ?? ''), 0, 255);
+
+        // Canonicalize the position so "atty 5" and "Attorney V" store as the same title
+        $position  = canonical_position_title(mb_substr(trim($c['position'] ?? ''), 0, 255));
         if ($position === '') $position = 'UNASSIGNED';
-        // Canonicalize so "atty 5" and "Attorney V" store as the same title
-        $position  = canonical_position_title($position);
+
         $remarks   = mb_substr(trim($c['remarks'] ?? ''), 0, 2000);
 
         $interviewDate = mb_substr(trim($c['interviewDate'] ?? ''), 0, 255);
@@ -91,8 +74,6 @@ try {
 
         $scores = is_array($c['scores'] ?? null) ? $c['scores'] : [];
 
-        // Keep only raters that actually have a number in them, and remember
-        // the order they appeared in on screen (that order gets persisted below).
         $cleanScores = [];
         $orderKey = $office . "\0" . $position;
         foreach ($scores as $rater => $pt) {
@@ -100,7 +81,7 @@ try {
             if ($rater === '') continue;
             $p = cleanScore($pt['p'] ?? null);
             $t = cleanScore($pt['t'] ?? null);
-            if ($p === null && $t === null) continue; // fully blank column for this candidate — nothing to store
+            if ($p === null && $t === null) continue;
             $cleanScores[$rater] = ['p' => $p, 't' => $t];
             if (!isset($orderByPosition[$orderKey])) $orderByPosition[$orderKey] = [];
             if (!in_array($rater, $orderByPosition[$orderKey], true)) $orderByPosition[$orderKey][] = $rater;
@@ -117,10 +98,9 @@ try {
             $candidateId = $conn->insert_id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $candidateId];
         } else {
-            continue; // blank filler row — nothing to save
+            continue;
         }
 
-        // Replace this candidate's score rows with exactly what's on screen now
         $stmtDeleteScores->bind_param("i", $candidateId);
         $stmtDeleteScores->execute();
 
@@ -131,7 +111,7 @@ try {
     }
 
     // =====================================================================
-    // Delete entire position tables that the user removed from the results page
+    // Delete entire position tables the user removed from the results page
     // =====================================================================
     $deletedPositions = 0;
     if (isset($data['positionsToDelete']) && is_array($data['positionsToDelete'])) {
@@ -149,16 +129,13 @@ try {
             $pos = canonical_position_title(mb_substr(trim((string)($entry['position'] ?? '')), 0, 255));
             if ($off === '' || $pos === '' || $pos === 'UNASSIGNED') continue;
 
-            // Delete scores for any candidate under this office+position
             $stmtDelScores->bind_param('ss', $off, $pos);
             $stmtDelScores->execute();
 
-            // Delete the candidates themselves
             $stmtDelCands->bind_param('ss', $off, $pos);
             $stmtDelCands->execute();
             $deletedPositions += $stmtDelCands->affected_rows;
 
-            // Delete the rater-order record
             $stmtDelOrder->bind_param('ss', $off, $pos);
             $stmtDelOrder->execute();
         }
@@ -168,16 +145,14 @@ try {
     }
 
     // Rater columns on screen (including empty ones), merged per office + position.
-    // The saved list is replaced with what is on screen, so a removed column stays removed.
     $savedColumns = 0;
     if (isset($data['columns']) && is_array($data['columns'])) {
-        $mergedCols = []; // "OFFICE\0Position" => [rater, ...] in on-screen order
+        $mergedCols = [];
         foreach ($data['columns'] as $col) {
             if (!is_array($col)) continue;
             $colOffice   = strtoupper(mb_substr(trim((string)($col['office'] ?? '')), 0, 100));
-            $colPosition = mb_substr(trim((string)($col['position'] ?? '')), 0, 255);
+            $colPosition = canonical_position_title(mb_substr(trim((string)($col['position'] ?? '')), 0, 255));
             if ($colPosition === '') $colPosition = 'UNASSIGNED';
-            $colPosition = canonical_position_title($colPosition);
             if ($colOffice === '' || !is_array($col['raters'] ?? null)) continue;
 
             $k = $colOffice . "\0" . $colPosition;
@@ -207,8 +182,7 @@ try {
         }
     }
 
-    // Tabs that were deleted or renamed on screen: drop their leftover saved columns so they don't reappear as empty tabs.
-    // (Candidates and scores are not touched here.)
+    // Tabs that were deleted or renamed on screen
     $tabList = [];
     if (isset($data['tabs']) && is_array($data['tabs'])) {
         foreach (array_slice($data['tabs'], 0, 200) as $t) {
@@ -222,7 +196,6 @@ try {
             $stmtTabs->execute();
             $stmtTabs->close();
 
-            // A tab that is on screen is an active tab: make sure it isn't marked as deleted
             try {
                 $stmtShow = $conn->prepare("DELETE FROM removed_tabs WHERE office IN ($marks)");
                 $stmtShow->bind_param(str_repeat('s', count($tabList)), ...$tabList);
@@ -234,7 +207,6 @@ try {
         }
     }
 
-    // Built-in tabs that were renamed away from: keep them hidden so they don't come back empty
     if (isset($data['hiddenTabs']) && is_array($data['hiddenTabs'])) {
         try {
             $stmtHide = $conn->prepare("INSERT INTO removed_tabs (office) VALUES (?)
@@ -251,13 +223,11 @@ try {
         }
     }
 
-    // Persist column order per office+position (idempotent — only new raters get appended)
     foreach ($orderByPosition as $key => $ratersInOrder) {
         [$office, $position] = explode("\0", $key, 2);
         record_rater_order($conn, $office, $position, $ratersInOrder);
     }
 
-    // Header labels (group titles, AVE labels, etc. — still used as-is)
     if (isset($data['headers']) && is_array($data['headers'])) {
         $h = $data['headers'];
         $get = function($key, $default = '') use ($h) {
