@@ -144,8 +144,70 @@ require_role(['rater', 'user']);
             cursor: default; 
         }
 
+        /* Position autocomplete wrapper */
+        .pos-wrap {
+            position: relative;
+            display: inline-block;
+            width: 60%;
+            vertical-align: middle;
+        }
+        .pos-wrap input {
+            width: 100%;
+            display: inline-block;
+            border-bottom: 1px solid #000;
+            background: transparent;
+        }
+        .pos-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            background: #fff;
+            border: 1px solid #999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-height: 260px;
+            overflow-y: auto;
+            margin-top: 2px;
+        }
+        .pos-dropdown.open { display: block; }
+        .pos-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pos-item:last-child { border-bottom: none; }
+        .pos-item:hover,
+        .pos-item.highlight {
+            background: #e8f5e9;
+            color: #107c41;
+        }
+        .pos-item mark {
+            background: #fff59d;
+            padding: 0;
+            font-weight: bold;
+        }
+        .pos-empty {
+            padding: 8px 10px;
+            color: #888;
+            font-size: 12px;
+            font-style: italic;
+        }
+        .pos-hint {
+            padding: 6px 10px;
+            background: #fff6e0;
+            color: #7a5a00;
+            font-size: 11px;
+            border-top: 1px solid #f0dca0;
+        }
+
        @media print {
-    .btn-container, #positionBackBtn { display: none !important; }
+    .btn-container, #positionBackBtn, .pos-dropdown { display: none !important; }
     #raterDropdown > div { display: none !important; }
     #raterSummary::-webkit-details-marker { display: none; }
     #raterSummary { border-bottom: none !important; padding: 0 !important; }
@@ -215,7 +277,10 @@ require_role(['rater', 'user']);
                 <option value="Community Development Officer I">Community Development Officer I</option>
                 <option value="__OTHER__">Others (type position)...</option>
             </select>
-            <input type="text" name="position_title" id="position_custom" oninput="applyFormLayout()" placeholder="Type position title" maxlength="255" disabled style="display: none; width: 60%; border-bottom: 1px solid #000;">
+            <span class="pos-wrap" id="positionCustomWrap" style="display: none;">
+                <input type="text" name="position_title" id="position_custom" autocomplete="off" placeholder="Type to search..." maxlength="255" disabled>
+                <div class="pos-dropdown" id="positionDropdown"></div>
+            </span>
             <button type="button" id="positionBackBtn" onclick="backToPositionList()" style="display: none; padding: 2px 8px; font-size: 12px;" title="Back to list">&times; list</button>
         </td>
     </tr>
@@ -500,61 +565,83 @@ require_role(['rater', 'user']);
 </form>
 
 <script>
-    const POSITIONS_BY_OFFICE = {
-        "Regional Office": [
-            "ADMINISTRATIVE OFFICER III (CASHIER)", "ADMINISTRATIVE OFFICER V (CASHIER III)", "ACCOUNTANT III",
-            "DMO 1 (LPDD)", "DMO 1 (CDD)", "DMO 2 (LPDD)", "Forester II (SMD)", "ADOF2", "ADAS2",
-            "AO IV-PMD", "PEO III-PMD", "PLO IV-PMD", "SREMS", "EMS II", "ENG 1", "CARTO IV", "FORESTER III",
-            "ADOF 1- SMD", "DMO III-LPDD", "DMO III-CDD", "AO IV-ADMIN", "SAO", "AO V- ADMIN",
-            "ADAS II- ORED", "ADAS III- ORED", "ENGA", "CARTO", "ADA6- LEGA", "ZOOT", "MTH", "MTHA 2", "ADA6- SMD"
-        ],
-        "PENRO Aklan": [
-            "PLANNING OFFICER I", "CARTOGRAPHER I", "Forest Technician I", "FOREST TECHNICIAN II",
-            "FOREST RANGER", "RECORDS OFFICER I", "SVEMS", "EMS 1", "Forester I"
-        ],
-        "PENRO Capiz": [
-            "Forest Ranger", "FT I", "FT II", "Forester I", "Planning Officer I", "Forester III", "SVEMS"
-        ],
-        "PENRO Guimaras": [
-            "LAND MANAGEMENT OFFICER I", "COMMUNITY DEVELOPMENT OFFICER II", "PLANNING OFFICER II",
-            "ADMINISTRATIVE OFFICER I (CASHIER)", "ADMINISTRATIVE AIDE VI", "LAND MANAGEMENT INVESTIGATOR",
-            "FOREST TECHNICIAN I/II"
-        ],
-        "PENRO Antique": [
-            "ADOF (Records Officer I)", "FT I", "FT II", "EMS I", "GE", "SVEMS"
-        ],
-        "PENRO Iloilo": [
-            "Forester I (Guimbal)", "Records Officer (PENRO Iloilo)", "PLANNING OFFICER I (PENRO Iloilo)",
-            "Forester I (Barotac)", "MLO I (Sara)", "CAO", "LMO II", "GE"
-        ]
-    };
+    // ============================================================
+    // MASTER POSITION LIST
+    // Every canonical position that can be assigned. The user types
+    // to filter this list; picking an entry fills the input exactly.
+    // ============================================================
+    const ALL_POSITIONS = [
+        // --- Attorney ---
+        "Attorney II", "Attorney III", "Attorney IV", "Attorney V",
+        // --- Planning Officer ---
+        "Planning Officer I", "Planning Officer II", "Planning Officer III", "Planning Officer IV", "Planning Officer V",
+        // --- Project Evaluation Officer ---
+        "Project Evaluation Officer I", "Project Evaluation Officer II", "Project Evaluation Officer III",
+        // --- Development Management Officer ---
+        "Development Management Officer I", "Development Management Officer II",
+        "Development Management Officer III", "Development Management Officer IV", "Development Management Officer V",
+        // --- Engineer (Geodetic) ---
+        "Engineer I (Geodetic Engineer)", "Engineer II (Geodetic Engineer)", "Engineer III (Geodetic Engineer)",
+        "Engineer IV (Geodetic Engineer)", "Engineer V (Geodetic Engineer)",
+        // --- Forester ---
+        "Forester I", "Forester II", "Forester III", "Forester IV", "Forester V",
+        // --- Land Management Officer ---
+        "Land Management Officer I", "Land Management Officer II", "Land Management Officer III", "Land Management Officer IV",
+        // --- Administrative ---
+        "Administrative Officer I", "Administrative Officer II", "Administrative Officer III",
+        "Administrative Officer IV", "Administrative Officer V",
+        "Administrative Officer V (Budget Officer III)",
+        "Administrative Officer V (HRMO III)",
+        "Administrative Officer V (Cashier III)",
+        "Administrative Assistant I", "Administrative Assistant II", "Administrative Assistant III",
+        "Administrative Aide I", "Administrative Aide III", "Administrative Aide IV", "Administrative Aide VI",
+        "Supervising Administrative Officer",
+        "Chief Administrative Officer",
+        // --- Accountant ---
+        "Accountant I", "Accountant II", "Accountant III",
+        // --- Information Systems ---
+        "Information Systems Analyst I", "Information Systems Analyst II", "Information Systems Analyst III",
+        // --- Ecosystems Management ---
+        "Ecosystems Management Specialist I", "Ecosystems Management Specialist II",
+        "Senior Ecosystems Management Specialist",
+        "Supervising Ecosystems Management Specialist",
+        "Chief Ecosystems Management Specialist",
+        // --- Communications / Information ---
+        "Communication Development Officer I", "Communication Development Officer II",
+        "Senior Communications Development Officer",
+        "Information Officer I", "Information Officer II",
+        // --- Cartographer ---
+        "Cartographer I", "Cartographer II", "Cartographer III", "Cartographer IV",
+        // --- Forest / Forest Technician ---
+        "Forest Technician I", "Forest Technician II",
+        "Forest Ranger",
+        "Tree Marker", "Scaler", "Tracer",
+        // --- Land Management ---
+        "Land Management Inspector",
+        // --- Community Development ---
+        "Community Development Officer I", "Community Development Officer II",
+        "Community Development Assistant I", "Community Development Assistant II",
+        // --- Special Investigator ---
+        "Special Investigator I",
+        // --- Statistician ---
+        "Statistician I", "Statistician II", "Statistician III",
+        // --- Mathematician ---
+        "Mathematician I", "Mathematician Aide I", "Mathematician Aide II",
+        // --- Engineering Aide ---
+        "Engineering Aide",
+        // --- Park / Protected Area ---
+        "Park Operations Superintendent V",
+        "Park Maintenance Foreman", "Park Attendant II",
+        // --- PENRO / CENRO ---
+        "Provincial Environment & Natural Resources Officer",
+        "Community Environment & Natural Resources Officer",
+        "Community Environment & Natural Resources Officer (CENRO)",
+    ].sort((a, b) => a.localeCompare(b));
 
-    const DEFAULT_POSITIONS = [
-        "Land Management Officer I", "Land Management Officer II",
-        "Environmental Management Specialist I", "Environmental Management Specialist II",
-        "Administrative Officer I", "Administrative Assistant I",
-        "Forest Technician I", "Community Development Officer I"
-    ];
-
-    document.getElementById('scoringForm').addEventListener('input', e => {
-        const el = e.target;
-        if (el.type === 'number' && /^(cc|oc|lc|pcp|pco)\d$/.test(el.name || '')) {
-            if (el.value !== '' && parseFloat(el.value) > 10) el.value = '10';
-            if (el.value !== '' && parseFloat(el.value) < 0)  el.value = '0';
-        }
-    });
-
+    // Map of typeable shortcuts -> canonical title. These are still
+    // applied if the user types without picking from the dropdown.
     const LEADERSHIP_HIDDEN_POSITIONS = ["SVEMS"];
     const LEADERSHIP_HIDDEN = {};
-
-    function leadershipHidden(office, position) {
-        const pos = String(position || '').trim();
-        if (pos === '') return true;
-        if (LEADERSHIP_HIDDEN_POSITIONS.includes(pos.toUpperCase())) return true;
-        const rule = LEADERSHIP_HIDDEN[office];
-        if (rule === "*" || (Array.isArray(rule) && rule.includes(pos))) return true;
-        return leadershipLevelFor(pos) === null;
-    }
 
     const LEADERSHIP_LEVELS = [
         ["Planning Officer V", "I"],
@@ -624,6 +711,7 @@ require_role(['rater', 'user']);
     function compactNoParens(s) {
         return compactPosition(String(s || '').replace(/\([^)]*\)/g, ' '));
     }
+
     const LEADERSHIP_LEVEL_MAP = (function () {
         const map = {};
         LEADERSHIP_LEVELS.forEach(([t, lvl]) => { map[compactPosition(t)] = lvl; });
@@ -640,6 +728,7 @@ require_role(['rater', 'user']);
         });
         return map;
     })();
+
     function leadershipLevelFor(position) {
         const full = compactPosition(position);
         if (full === '') return null;
@@ -647,51 +736,150 @@ require_role(['rater', 'user']);
         const base = compactNoParens(position);
         return (base !== '' && base in LEADERSHIP_LEVEL_MAP) ? LEADERSHIP_LEVEL_MAP[base] : null;
     }
+
     const LC_BASIC = [1, 2, 3, 4, 5].map(i => document.getElementById('lcDesc' + i).textContent);
 
-    const CANONICAL_TITLE = (function () {
-        const map = {};
-        LEADERSHIP_LEVELS.forEach(([title]) => {
-            map[compactPosition(title)] = title;
-            const cp = compactNoParens(title);
-            if (!(cp in map)) map[cp] = title;
-        });
-        LEADERSHIP_ALIASES.forEach(([abbr, numeral, lvl]) => {
-            const canonical = LEADERSHIP_LEVELS.find(([t, l]) => {
-                if (l !== lvl) return false;
-                const ct = compactPosition(t);
-                if (!ct.startsWith(abbr)) return false;
-                if (numeral !== '' && !ct.endsWith(numeral)) return false;
-                return true;
-            });
-            if (!canonical) return;
-            const keys = new Set();
-            keys.add(abbr + numeral);
-            if (numeral && NUMERAL_DIGIT[numeral]) keys.add(abbr + NUMERAL_DIGIT[numeral]);
-            if (numeral && DIGIT_NUMERAL[numeral]) keys.add(abbr + DIGIT_NUMERAL[numeral]);
-            keys.forEach(k => { if (!(k in map)) map[k] = canonical[0]; });
-        });
-        return map;
-    })();
+    // ============================================================
+    // POSITION AUTOCOMPLETE DROPDOWN
+    // ============================================================
+    const positionInput = document.getElementById('position_custom');
+    const positionDropdown = document.getElementById('positionDropdown');
+    let highlightedIndex = -1;
+    let currentMatches = [];
 
-    function canonicalPosition(s) {
-        const raw = String(s || '').trim();
-        if (raw === '') return '';
-        const full = compactPosition(raw);
-        if (full in CANONICAL_TITLE) return CANONICAL_TITLE[full];
-        const base = compactNoParens(raw);
-        if (base in CANONICAL_TITLE) return CANONICAL_TITLE[base];
-        return raw;
+    function openDropdown() {
+        positionDropdown.classList.add('open');
+    }
+    function closeDropdown() {
+        positionDropdown.classList.remove('open');
+        highlightedIndex = -1;
     }
 
-    function snapPositionToCanonical() {
-        const custom = document.getElementById('position_custom');
-        if (!custom || custom.disabled) return;
-        const typed = custom.value.trim();
-        if (typed === '') return;
-        const canonical = canonicalPosition(typed);
-        if (canonical && canonical !== typed) custom.value = canonical;
+    function escapeHtml(s) {
+        return String(s ?? '').replace(/[&<>"']/g, ch => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[ch]));
+    }
+
+    function highlightMatch(text, query) {
+        if (!query) return escapeHtml(text);
+        const idx = text.toUpperCase().indexOf(query.toUpperCase());
+        if (idx === -1) return escapeHtml(text);
+        return escapeHtml(text.slice(0, idx)) +
+               '<mark>' + escapeHtml(text.slice(idx, idx + query.length)) + '</mark>' +
+               escapeHtml(text.slice(idx + query.length));
+    }
+
+    function renderDropdown(query) {
+        const q = String(query || '').trim();
+
+        // Empty query: show everything (or first 50 for speed)
+        let matches;
+        if (q === '') {
+            matches = ALL_POSITIONS.slice(0, 50);
+        } else {
+            const qUpper = q.toUpperCase();
+            matches = ALL_POSITIONS.filter(p => p.toUpperCase().includes(qUpper));
+            // Prefer titles that START with the query
+            matches.sort((a, b) => {
+                const aStarts = a.toUpperCase().startsWith(qUpper) ? 0 : 1;
+                const bStarts = b.toUpperCase().startsWith(qUpper) ? 0 : 1;
+                if (aStarts !== bStarts) return aStarts - bStarts;
+                return a.localeCompare(b);
+            });
+        }
+
+        currentMatches = matches;
+        highlightedIndex = matches.length > 0 ? 0 : -1;
+
+        if (matches.length === 0) {
+            positionDropdown.innerHTML = `
+                <div class="pos-empty">No matching position.</div>
+                <div class="pos-hint">You can still type a custom title and press Save — but exact matches work best.</div>
+            `;
+            openDropdown();
+            return;
+        }
+
+        let html = matches.slice(0, 60).map((p, i) =>
+            `<div class="pos-item${i === 0 ? ' highlight' : ''}" data-value="${escapeHtml(p)}">${highlightMatch(p, q)}</div>`
+        ).join('');
+
+        if (matches.length > 60) {
+            html += `<div class="pos-empty">…and ${matches.length - 60} more. Keep typing to narrow down.</div>`;
+        }
+
+        positionDropdown.innerHTML = html;
+        openDropdown();
+    }
+
+    positionDropdown.addEventListener('mousedown', (e) => {
+        // mousedown so it fires before blur
+        const item = e.target.closest('.pos-item');
+        if (!item) return;
+        e.preventDefault();
+        positionInput.value = item.getAttribute('data-value');
+        closeDropdown();
         applyFormLayout();
+    });
+
+    positionInput.addEventListener('input', () => {
+        renderDropdown(positionInput.value);
+        applyFormLayout();
+    });
+
+    positionInput.addEventListener('focus', () => {
+        renderDropdown(positionInput.value);
+    });
+
+    positionInput.addEventListener('blur', () => {
+        // Delay so mousedown on an item can fire first
+        setTimeout(closeDropdown, 150);
+    });
+
+    positionInput.addEventListener('keydown', (e) => {
+        if (!positionDropdown.classList.contains('open')) {
+            if (e.key === 'ArrowDown') { renderDropdown(positionInput.value); e.preventDefault(); }
+            return;
+        }
+        const items = positionDropdown.querySelectorAll('.pos-item');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            highlightedIndex = Math.min(highlightedIndex + 1, items.length - 1);
+            updateHighlight(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            highlightedIndex = Math.max(highlightedIndex - 1, 0);
+            updateHighlight(items);
+        } else if (e.key === 'Enter') {
+            if (highlightedIndex >= 0 && items[highlightedIndex]) {
+                e.preventDefault();
+                positionInput.value = items[highlightedIndex].getAttribute('data-value');
+                closeDropdown();
+                applyFormLayout();
+            }
+        } else if (e.key === 'Escape') {
+            closeDropdown();
+        }
+    });
+
+    function updateHighlight(items) {
+        items.forEach((it, i) => it.classList.toggle('highlight', i === highlightedIndex));
+        if (items[highlightedIndex]) {
+            items[highlightedIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    // ============================================================
+    // FORM LAYOUT / LEADERSHIP VISIBILITY
+    // ============================================================
+    function leadershipHidden(office, position) {
+        const pos = String(position || '').trim();
+        if (pos === '') return true;
+        if (LEADERSHIP_HIDDEN_POSITIONS.includes(pos.toUpperCase())) return true;
+        const rule = LEADERSHIP_HIDDEN[office];
+        if (rule === "*" || (Array.isArray(rule) && rule.includes(pos))) return true;
+        return leadershipLevelFor(pos) === null;
     }
 
     function currentPosition() {
@@ -724,20 +912,9 @@ require_role(['rater', 'user']);
         if (typeof markEdited === 'function') markEdited();
     }
 
-    function updatePositionOptions() {
-        const office = document.getElementById('office_name').value;
-        const posSelect = document.getElementById('position_title');
-        const positions = POSITIONS_BY_OFFICE[office] || DEFAULT_POSITIONS;
-
-        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        posSelect.innerHTML = '<option value="">-- Select Position --</option>' +
-            positions.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('') +
-            '<option value="__OTHER__">Others (type position)...</option>';
-        togglePositionOther();
-    }
-
     function togglePositionOther() {
         const sel = document.getElementById('position_title');
+        const customWrap = document.getElementById('positionCustomWrap');
         const custom = document.getElementById('position_custom');
         const backBtn = document.getElementById('positionBackBtn');
         const isOther = sel.value === '__OTHER__';
@@ -748,17 +925,19 @@ require_role(['rater', 'user']);
             sel.style.display = 'none';
             custom.disabled = false;
             custom.required = true;
-            custom.style.display = 'inline-block';
+            customWrap.style.display = 'inline-block';
             backBtn.style.display = 'inline-block';
             custom.focus();
+            renderDropdown(custom.value);
         } else {
             sel.setAttribute('name', 'position_title');
             custom.removeAttribute('name');
             sel.style.display = 'inline-block';
             custom.disabled = true;
             custom.required = false;
-            custom.style.display = 'none';
+            customWrap.style.display = 'none';
             backBtn.style.display = 'none';
+            closeDropdown();
         }
     }
 
@@ -770,7 +949,11 @@ require_role(['rater', 'user']);
     }
 
     document.getElementById('scoringForm').addEventListener('reset', () => {
-        setTimeout(() => { document.getElementById('position_custom').value = ''; updatePositionOptions(); applyFormLayout(); }, 0);
+        setTimeout(() => {
+            document.getElementById('position_custom').value = '';
+            togglePositionOther();
+            applyFormLayout();
+        }, 0);
     });
 
     let raterClickOrder = [];
@@ -807,6 +990,11 @@ require_role(['rater', 'user']);
     document.addEventListener('click', e => {
         const dd = document.getElementById('raterDropdown');
         if (dd && !dd.contains(e.target)) dd.open = false;
+        const pdd = document.getElementById('positionDropdown');
+        const pwrap = document.getElementById('positionCustomWrap');
+        if (pdd && pwrap && !pwrap.contains(e.target)) {
+            closeDropdown();
+        }
     });
 
     function goToAdminResults(event) {
@@ -820,7 +1008,7 @@ require_role(['rater', 'user']);
         const btn  = document.getElementById('saveBtn');
 
         updateRaterSummary();
-        snapPositionToCanonical();
+        closeDropdown();
         if (selectedRaters().length === 0) {
             alert('Please select at least one rater.');
             return;
@@ -875,9 +1063,6 @@ require_role(['rater', 'user']);
         markEdited();
         window.scrollTo(0, 0);
     }
-
-    document.getElementById('position_custom').addEventListener('blur', snapPositionToCanonical);
-    document.getElementById('position_custom').addEventListener('change', snapPositionToCanonical);
 
     applyFormLayout();
 
