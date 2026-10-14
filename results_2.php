@@ -11,7 +11,6 @@ header('Pragma: no-cache');
 
 ensure_schema($conn);
 
-// Rater columns that were saved for each office + position, in their saved left-to-right order.
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
@@ -19,7 +18,7 @@ try {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
 
-// Canonicalize stored-order keys so "Atty 5" and "Attorney V" collapse into one key
+// Canonicalize stored-order keys
 $canonicalStoredOrders = [];
 foreach ($storedOrders as $off => $positions) {
     foreach ($positions as $pos => $raters) {
@@ -53,13 +52,9 @@ $groupedCandidates = [];
 if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $office = !empty($row['office_name']) ? strtoupper(trim($row['office_name'])) : 'REGIONAL OFFICE';
-
-        // Canonicalize on load — so old "Atty 5" rows display as "Attorney V"
         $position = canonical_position_title((string)($row['position_title'] ?? 'LMO I'));
 
-        if (!isset($groupedCandidates[$office])) {
-            $groupedCandidates[$office] = [];
-        }
+        if (!isset($groupedCandidates[$office])) $groupedCandidates[$office] = [];
 
         $id = (int)$row['id'];
         $legacyP = []; $legacyT = [];
@@ -90,16 +85,12 @@ foreach ($defaultOffices as $defOffice) {
     $orderedOffices[$defOffice] = $groupedCandidates[$defOffice] ?? [];
 }
 foreach ($groupedCandidates as $office => $list) {
-    if (!isset($orderedOffices[$office])) {
-        $orderedOffices[$office] = $list;
-    }
+    if (!isset($orderedOffices[$office])) $orderedOffices[$office] = $list;
 }
 $groupedCandidates = $orderedOffices;
 
 foreach (array_keys($storedOrders) as $storedOffice) {
-    if (!isset($groupedCandidates[$storedOffice])) {
-        $groupedCandidates[$storedOffice] = [];
-    }
+    if (!isset($groupedCandidates[$storedOffice])) $groupedCandidates[$storedOffice] = [];
 }
 
 try {
@@ -145,9 +136,7 @@ try {
             'remarks'         => $settingsRow['hdr_remarks'] ?? 'REMARKS',
         ];
     }
-} catch (Exception $e) {
-    // fall back to defaults
-}
+} catch (Exception $e) {}
 
 function normalize_rater(string $label): ?string {
     $l = strtoupper(trim($label));
@@ -235,7 +224,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             font-weight: bold;
         }
 
-        /* Always-visible red circular X on every tab */
         .tab-close-btn {
             visibility: visible;
             display: inline-flex;
@@ -330,7 +318,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             flex-shrink: 0;
         }
 
-        /* Red delete-position button on the green banner */
         .pos-delete-btn {
             background: rgba(255, 255, 255, 0.2);
             color: #fff;
@@ -501,7 +488,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const addedRaters = {};
         const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
-        // Positions to permanently delete on next Save All Changes
         window.__positionsToDelete = window.__positionsToDelete || [];
 
         function escapeHtml(str) {
@@ -782,7 +768,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             renderAll();
         }
 
-        // Delete an entire position table (all candidates under one office + position)
         function deletePositionGroup(btnEl, office, position) {
             syncFromDom();
 
