@@ -148,7 +148,7 @@ require_role(['rater', 'user']);
         .pos-wrap {
             position: relative;
             display: inline-block;
-            width: 60%;
+            width: 75%;
             vertical-align: middle;
         }
         .pos-wrap input {
@@ -156,6 +156,7 @@ require_role(['rater', 'user']);
             display: inline-block;
             border-bottom: 1px solid #000;
             background: transparent;
+            padding: 4px 0;
         }
         .pos-dropdown {
             display: none;
@@ -167,13 +168,13 @@ require_role(['rater', 'user']);
             background: #fff;
             border: 1px solid #999;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            max-height: 260px;
+            max-height: 280px;
             overflow-y: auto;
             margin-top: 2px;
         }
         .pos-dropdown.open { display: block; }
         .pos-item {
-            padding: 6px 10px;
+            padding: 7px 10px;
             cursor: pointer;
             font-size: 13px;
             border-bottom: 1px solid #eee;
@@ -207,7 +208,7 @@ require_role(['rater', 'user']);
         }
 
        @media print {
-    .btn-container, #positionBackBtn, .pos-dropdown { display: none !important; }
+    .btn-container, .pos-dropdown { display: none !important; }
     #raterDropdown > div { display: none !important; }
     #raterSummary::-webkit-details-marker { display: none; }
     #raterSummary { border-bottom: none !important; padding: 0 !important; }
@@ -265,29 +266,16 @@ require_role(['rater', 'user']);
     <tr>
         <td class="info-cell">NAME: <input type="text" name="candidate_name" placeholder="" required style="width: 75%; display: inline-block;"></td>
         <td colspan="2" class="info-cell">Position: 
-            <select name="position_title" id="position_title" required style="width: 70%; display: inline-block;" onchange="togglePositionOther(); applyFormLayout()">
-                <option value="">-- Select Position --</option>
-                <option value="Land Management Officer I">Land Management Officer I</option>
-                <option value="Land Management Officer II">Land Management Officer II</option>
-                <option value="Environmental Management Specialist I">Environmental Management Specialist I</option>
-                <option value="Environmental Management Specialist II">Environmental Management Specialist II</option>
-                <option value="Administrative Officer I">Administrative Officer I</option>
-                <option value="Administrative Assistant I">Administrative Assistant I</option>
-                <option value="Forest Technician I">Forest Technician I</option>
-                <option value="Community Development Officer I">Community Development Officer I</option>
-                <option value="__OTHER__">Others (type position)...</option>
-            </select>
-            <span class="pos-wrap" id="positionCustomWrap" style="display: none;">
-                <input type="text" name="position_title" id="position_custom" autocomplete="off" placeholder="Type to search..." maxlength="255" disabled>
+            <span class="pos-wrap">
+                <input type="text" name="position_title" id="position_custom" autocomplete="off" placeholder="Type to search a position..." maxlength="255" required>
                 <div class="pos-dropdown" id="positionDropdown"></div>
             </span>
-            <button type="button" id="positionBackBtn" onclick="backToPositionList()" style="display: none; padding: 2px 8px; font-size: 12px;" title="Back to list">&times; list</button>
         </td>
     </tr>
     <tr>
         <td class="info-cell"></td>
         <td colspan="2" class="info-cell">Office: 
-            <select name="office_name" id="office_name" required style="width: 70%; display: inline-block;" onchange="updatePositionOptions(); applyFormLayout()">
+            <select name="office_name" id="office_name" required style="width: 70%; display: inline-block;" onchange="applyFormLayout()">
                 <option value="">-- Select Office / Branch --</option>
                 <option value="PENRO Iloilo">PENRO Iloilo</option>
                 <option value="PENRO Capiz">PENRO Capiz</option>
@@ -567,8 +555,6 @@ require_role(['rater', 'user']);
 <script>
     // ============================================================
     // MASTER POSITION LIST
-    // Every canonical position that can be assigned. The user types
-    // to filter this list; picking an entry fills the input exactly.
     // ============================================================
     const ALL_POSITIONS = [
         // --- Attorney ---
@@ -638,8 +624,6 @@ require_role(['rater', 'user']);
         "Community Environment & Natural Resources Officer (CENRO)",
     ].sort((a, b) => a.localeCompare(b));
 
-    // Map of typeable shortcuts -> canonical title. These are still
-    // applied if the user types without picking from the dropdown.
     const LEADERSHIP_HIDDEN_POSITIONS = ["SVEMS"];
     const LEADERSHIP_HIDDEN = {};
 
@@ -773,14 +757,12 @@ require_role(['rater', 'user']);
     function renderDropdown(query) {
         const q = String(query || '').trim();
 
-        // Empty query: show everything (or first 50 for speed)
         let matches;
         if (q === '') {
             matches = ALL_POSITIONS.slice(0, 50);
         } else {
             const qUpper = q.toUpperCase();
             matches = ALL_POSITIONS.filter(p => p.toUpperCase().includes(qUpper));
-            // Prefer titles that START with the query
             matches.sort((a, b) => {
                 const aStarts = a.toUpperCase().startsWith(qUpper) ? 0 : 1;
                 const bStarts = b.toUpperCase().startsWith(qUpper) ? 0 : 1;
@@ -814,7 +796,6 @@ require_role(['rater', 'user']);
     }
 
     positionDropdown.addEventListener('mousedown', (e) => {
-        // mousedown so it fires before blur
         const item = e.target.closest('.pos-item');
         if (!item) return;
         e.preventDefault();
@@ -833,7 +814,6 @@ require_role(['rater', 'user']);
     });
 
     positionInput.addEventListener('blur', () => {
-        // Delay so mousedown on an item can fire first
         setTimeout(closeDropdown, 150);
     });
 
@@ -883,9 +863,8 @@ require_role(['rater', 'user']);
     }
 
     function currentPosition() {
-        const sel = document.getElementById('position_title');
         const custom = document.getElementById('position_custom');
-        return (sel && sel.value === '__OTHER__') ? (custom ? custom.value.trim() : '') : (sel ? sel.value : '');
+        return custom ? custom.value.trim() : '';
     }
 
     function applyFormLayout() {
@@ -912,46 +891,10 @@ require_role(['rater', 'user']);
         if (typeof markEdited === 'function') markEdited();
     }
 
-    function togglePositionOther() {
-        const sel = document.getElementById('position_title');
-        const customWrap = document.getElementById('positionCustomWrap');
-        const custom = document.getElementById('position_custom');
-        const backBtn = document.getElementById('positionBackBtn');
-        const isOther = sel.value === '__OTHER__';
-
-        if (isOther) {
-            sel.removeAttribute('name');
-            custom.setAttribute('name', 'position_title');
-            sel.style.display = 'none';
-            custom.disabled = false;
-            custom.required = true;
-            customWrap.style.display = 'inline-block';
-            backBtn.style.display = 'inline-block';
-            custom.focus();
-            renderDropdown(custom.value);
-        } else {
-            sel.setAttribute('name', 'position_title');
-            custom.removeAttribute('name');
-            sel.style.display = 'inline-block';
-            custom.disabled = true;
-            custom.required = false;
-            customWrap.style.display = 'none';
-            backBtn.style.display = 'none';
-            closeDropdown();
-        }
-    }
-
-    function backToPositionList() {
-        const sel = document.getElementById('position_title');
-        sel.value = '';
-        document.getElementById('position_custom').value = '';
-        togglePositionOther();
-    }
-
     document.getElementById('scoringForm').addEventListener('reset', () => {
         setTimeout(() => {
             document.getElementById('position_custom').value = '';
-            togglePositionOther();
+            closeDropdown();
             applyFormLayout();
         }, 0);
     });
@@ -991,7 +934,7 @@ require_role(['rater', 'user']);
         const dd = document.getElementById('raterDropdown');
         if (dd && !dd.contains(e.target)) dd.open = false;
         const pdd = document.getElementById('positionDropdown');
-        const pwrap = document.getElementById('positionCustomWrap');
+        const pwrap = document.querySelector('.pos-wrap');
         if (pdd && pwrap && !pwrap.contains(e.target)) {
             closeDropdown();
         }
