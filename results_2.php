@@ -133,7 +133,7 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // sheet_settings missing — use defaults above
+    // sheet_settings missing — use defaults
 }
 
 function normalize_rater(string $label): ?string {
@@ -222,7 +222,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             font-weight: bold;
         }
 
-        /* Always-visible red circular X on every tab */
+        /* Always-visible red X on tabs */
         .tab-close-btn {
             visibility: visible;
             display: inline-flex;
@@ -240,13 +240,11 @@ foreach ($groupedCandidates as $officeKey => $list) {
             cursor: pointer;
             user-select: none;
             flex-shrink: 0;
-            transition: background 0.15s, color 0.15s;
         }
         .tab-close-btn:hover {
             background: #c0392b;
             color: #fff;
         }
-        @media print { .tab-close-btn { display: none !important; } }
 
         .excel-tab-add {
             padding: 4px 10px;
@@ -307,7 +305,42 @@ foreach ($groupedCandidates as $officeKey => $list) {
             letter-spacing: 0.5px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            gap: 10px;
         }
+
+        .position-banner .banner-left { flex: 1; min-width: 0; }
+        .position-banner .banner-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        /* The red delete-position button on the green banner */
+        .pos-delete-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            width: 26px;
+            height: 26px;
+            font-size: 16px;
+            font-weight: bold;
+            line-height: 1;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            transition: background 0.15s, transform 0.15s;
+        }
+        .pos-delete-btn:hover {
+            background: #c0392b;
+            border-color: #c0392b;
+            transform: scale(1.05);
+        }
+        @media print { .pos-delete-btn { display: none !important; } }
 
         .excel-table { 
             border-collapse: collapse; 
@@ -401,21 +434,15 @@ foreach ($groupedCandidates as $officeKey => $list) {
             .doc-header .gov-title, .doc-header .office-sub { font-size: 9px; }
             .doc-header .agency-title { font-size: 11px; }
             .doc-header .doc-name { font-size: 12px; }
-            .position-banner { flex-direction: column; gap: 2px; text-align: center; font-size: 10px; padding: 5px 6px; }
+            .position-banner { flex-direction: column; gap: 6px; text-align: left; font-size: 10px; padding: 6px 8px; }
+            .position-banner .banner-right { width: 100%; justify-content: space-between; }
             .excel-table { font-size: 10px; }
             .excel-table th, .excel-table td { padding: 4px 3px; }
             .row-num-cell { width: 26px; }
             .action-bar { flex-wrap: wrap; gap: 6px; }
             .btn { padding: 8px 12px; font-size: 11px; }
             .signatory-section { grid-template-columns: 1fr; gap: 30px; }
-
-            /* Bigger tap target for the X */
-            .tab-close-btn {
-                width: 22px;
-                height: 22px;
-                font-size: 15px;
-                margin-left: 8px;
-            }
+            .tab-close-btn { width: 22px; height: 22px; font-size: 15px; margin-left: 8px; }
         }
 
         @media print {
@@ -461,6 +488,9 @@ foreach ($groupedCandidates as $officeKey => $list) {
         let skipNextSync = false;
         const addedRaters = {};
         const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+        // Positions to permanently delete when Save All Changes is clicked
+        window.__positionsToDelete = window.__positionsToDelete || [];
 
         function escapeHtml(str) {
             return String(str ?? '').replace(/[&<>"']/g, ch => ({
@@ -592,12 +622,21 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
 
             const positionAttr = posKey ? ` data-position="${escapeHtml(posKey)}"` : '';
+            // Escape for use inside an inline onclick attribute
+            const escOffice = escapeHtml(branch).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const escPos = escapeHtml(posKey).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
             return `
                 <div class="table-block"${positionAttr}>
                     <div class="position-banner">
-                        <span>POSITION TITLE: ${escapeHtml(posKey)}</span>
-                        <span>OFFICE: ${escapeHtml(branch)}</span>
+                        <span class="banner-left">POSITION TITLE: ${escapeHtml(posKey)}</span>
+                        <span class="banner-right">
+                            <span>OFFICE: ${escapeHtml(branch)}</span>
+                            <button type="button"
+                                    class="pos-delete-btn no-print"
+                                    title="Delete this entire position table"
+                                    onclick="deletePositionGroup(this, &quot;${escOffice}&quot;, &quot;${escPos}&quot;)">×</button>
+                        </span>
                     </div>
                     <div class="table-scroll">
                         <table class="excel-table">
@@ -732,6 +771,49 @@ foreach ($groupedCandidates as $officeKey => $list) {
             renderAll();
         }
 
+        // Delete an entire position table (all candidates under one office + position)
+        function deletePositionGroup(btnEl, office, position) {
+            syncFromDom();
+
+            const list = groupedData[office] || [];
+            const matching = list.filter(c => {
+                const pos = (c.position && c.position.trim() !== '') ? c.position.trim() : 'UNASSIGNED';
+                return pos === position;
+            });
+
+            const savedCount = matching.filter(c => c.id > 0).length;
+            const msg = savedCount > 0
+                ? `Delete the entire "${position}" table for ${office}?\n\nThis will remove ${savedCount} saved applicant(s) and all of their scores, plus every rater column for this position.`
+                : `Delete the entire "${position}" table for ${office}?`;
+
+            if (!confirm(msg)) return;
+
+            // 1) Remove from the in-memory grouped data
+            groupedData[office] = list.filter(c => {
+                const pos = (c.position && c.position.trim() !== '') ? c.position.trim() : 'UNASSIGNED';
+                return pos !== position;
+            });
+
+            // 2) Remove any rater-column overrides for this position
+            if (storedOrders[office] && storedOrders[office][position]) {
+                delete storedOrders[office][position];
+            }
+            Object.keys(addedRaters).forEach(k => {
+                if (k.indexOf(office + '|' + position + '|') === 0) delete addedRaters[k];
+            });
+
+            // 3) Queue for permanent deletion on the server (sent on next Save All Changes)
+            window.__positionsToDelete.push({ office: office, position: position });
+
+            // 4) Redraw
+            skipNextSync = true;
+            renderAll();
+
+            if (savedCount > 0) {
+                alert('Removed from view.\n\nClick "Save All Changes" to permanently delete from the database.');
+            }
+        }
+
         function renderAll() {
             if (!skipNextSync) syncFromDom();
             skipNextSync = false;
@@ -756,7 +838,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 tabLabel.innerText = branch;
                 tab.appendChild(tabLabel);
 
-                // Always-visible red circular X
                 const closeBtn = document.createElement('span');
                 closeBtn.className = 'tab-close-btn';
                 closeBtn.innerText = '×';
@@ -1017,14 +1098,20 @@ foreach ($groupedCandidates as $officeKey => $list) {
             fetch('save_score.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ csrf_token: CSRF_TOKEN, candidates: candidatesToSave, columns: columnsToSave, tabs: tabsToSave, hiddenTabs: Array.from(hiddenTabs), headers: headerLabels })
+                body: JSON.stringify({
+                    csrf_token: CSRF_TOKEN,
+                    candidates: candidatesToSave,
+                    columns: columnsToSave,
+                    tabs: tabsToSave,
+                    hiddenTabs: Array.from(hiddenTabs),
+                    headers: headerLabels,
+                    positionsToDelete: window.__positionsToDelete
+                })
             })
             .then(res => res.text().then(text => {
                 let data;
                 try { data = JSON.parse(text); }
-                catch (e) {
-                    throw new Error('Server did not return JSON. First 300 chars: ' + text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300));
-                }
+                catch (e) { throw new Error('Server returned non-JSON. First 300 chars: ' + text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)); }
                 return data;
             }))
             .then(data => {
@@ -1035,9 +1122,13 @@ foreach ($groupedCandidates as $officeKey => $list) {
                             if (targetRow) targetRow.setAttribute('data-id', item.id);
                         });
                     }
+                    window.__positionsToDelete = [];
                     let msg = 'All interview rating sheets saved successfully!';
                     if (typeof data.savedColumns === 'number') {
-                        msg += '\n' + data.savedColumns + ' rater column(s) stored in the database.';
+                        msg += '\n' + data.savedColumns + ' rater column(s) stored.';
+                    }
+                    if (typeof data.deletedPositions === 'number' && data.deletedPositions > 0) {
+                        msg += '\n' + data.deletedPositions + ' position table(s) permanently deleted.';
                     }
                     alert(msg);
                 } else {
