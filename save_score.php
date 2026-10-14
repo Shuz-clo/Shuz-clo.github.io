@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || strpos($contentType, 'application/j
 $data = json_decode(file_get_contents('php://input'), true);
 
 if (!isset($data['candidates']) || !is_array($data['candidates'])) {
-       json_out(['status' => 'error', 'message' => 'Invalid data payload.']);
+    json_out(['status' => 'error', 'message' => 'Invalid data payload.']);
 }
 
 if (!verify_csrf($data['csrf_token'] ?? null)) {
@@ -65,6 +65,8 @@ try {
         $office    = mb_substr(trim($c['office'] ?? 'General Branch'), 0, 255);
         $position  = mb_substr(trim($c['position'] ?? ''), 0, 255);
         if ($position === '') $position = 'UNASSIGNED';
+        // Canonicalize so "atty 5" and "Attorney V" store as the same title
+        $position  = canonical_position_title($position);
         $remarks   = mb_substr(trim($c['remarks'] ?? ''), 0, 2000);
 
         $interviewDate = mb_substr(trim($c['interviewDate'] ?? ''), 0, 255);
@@ -111,6 +113,43 @@ try {
         }
     }
 
+    // =====================================================================
+    // Delete entire position tables that the user removed from the results page
+    // =====================================================================
+    $deletedPositions = 0;
+    if (isset($data['positionsToDelete']) && is_array($data['positionsToDelete'])) {
+        $stmtDelScores = $conn->prepare("DELETE cs FROM candidate_scores cs
+            JOIN candidates c ON c.id = cs.candidate_id
+            WHERE UPPER(TRIM(c.office_name)) = UPPER(?) AND TRIM(c.position_title) = ?");
+        $stmtDelCands = $conn->prepare("DELETE FROM candidates
+            WHERE UPPER(TRIM(office_name)) = UPPER(?) AND TRIM(position_title) = ?");
+        $stmtDelOrder = $conn->prepare("DELETE FROM position_rater_order
+            WHERE office = ? AND position = ?");
+
+        foreach ($data['positionsToDelete'] as $entry) {
+            if (!is_array($entry)) continue;
+            $off = strtoupper(mb_substr(trim((string)($entry['office'] ?? '')), 0, 100));
+            $pos = canonical_position_title(mb_substr(trim((string)($entry['position'] ?? '')), 0, 255));
+            if ($off === '' || $pos === '' || $pos === 'UNASSIGNED') continue;
+
+            // Delete scores for any candidate under this office+position
+            $stmtDelScores->bind_param('ss', $off, $pos);
+            $stmtDelScores->execute();
+
+            // Delete the candidates themselves
+            $stmtDelCands->bind_param('ss', $off, $pos);
+            $stmtDelCands->execute();
+            $deletedPositions += $stmtDelCands->affected_rows;
+
+            // Delete the rater-order record
+            $stmtDelOrder->bind_param('ss', $off, $pos);
+            $stmtDelOrder->execute();
+        }
+        $stmtDelScores->close();
+        $stmtDelCands->close();
+        $stmtDelOrder->close();
+    }
+
     // Rater columns on screen (including empty ones), merged per office + position.
     // The saved list is replaced with what is on screen, so a removed column stays removed.
     $savedColumns = 0;
@@ -121,6 +160,7 @@ try {
             $colOffice   = strtoupper(mb_substr(trim((string)($col['office'] ?? '')), 0, 100));
             $colPosition = mb_substr(trim((string)($col['position'] ?? '')), 0, 255);
             if ($colPosition === '') $colPosition = 'UNASSIGNED';
+            $colPosition = canonical_position_title($colPosition);
             if ($colOffice === '' || !is_array($col['raters'] ?? null)) continue;
 
             $k = $colOffice . "\0" . $colPosition;
@@ -257,7 +297,12 @@ try {
     }
 
     $conn->commit();
-    json_out(['status' => 'success', 'savedIds' => $savedIds, 'savedColumns' => $savedColumns]);
+    json_out([
+        'status'           => 'success',
+        'savedIds'         => $savedIds,
+        'savedColumns'     => $savedColumns,
+        'deletedPositions' => $deletedPositions
+    ]);
 } catch (Exception $e) {
     $conn->rollback();
     error_log('save_score error: ' . $e->getMessage());
