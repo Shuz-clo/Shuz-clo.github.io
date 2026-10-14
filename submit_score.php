@@ -49,10 +49,8 @@ $allowedOffices = [
 ];
 
 $candidate_name = mb_substr(trim($_POST['candidate_name'] ?? ''), 0, 255);
-
-// ✅ Canonicalize the position so "atty 5", "ATTY-5", "Attorney V" all save as "Attorney V"
-$position_title = canonical_position_title(mb_substr(trim($_POST['position_title'] ?? ''), 0, 255));
-
+$position_title = mb_substr(trim($_POST['position_title'] ?? ''), 0, 255);
+$position_title = canonical_position_title($position_title);
 $office_name    = trim($_POST['office_name'] ?? '');
 $interview_date = mb_substr(trim($_POST['interview_date'] ?? ''), 0, 100);
 $rater_name     = mb_substr(trim($_POST['rater_name'] ?? ''), 0, 255);
