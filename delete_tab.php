@@ -1,11 +1,12 @@
 <?php
-// Permanently deletes one tab (office) from the results sheet:
-//   - all applicants saved under that office, and their scores
-//   - the saved rater columns for that office
-//   - and remembers the tab as deleted, so built-in tabs don't come back on refresh.
-// Admin only, POST only, CSRF-protected. Replies with JSON.
+// ============================================================
+// delete_tab.php — FIXED
+//
+// FIX: Audit.php required; audit_log() called after a successful
+//      commit recording the office and deleted-candidate count.
+// ============================================================
 
-// Buffer everything so a stray PHP warning can never corrupt the JSON reply.
+// Permanently deletes one tab (office) from the results sheet.
 ob_start();
 
 require_once 'db.php';
@@ -13,6 +14,7 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_role('admin');
 require_once __DIR__ . '/Raters.php';
+require_once __DIR__ . '/Audit.php';
 
 function json_out(array $payload, int $code = 200): void {
     if (ob_get_length()) ob_clean();
@@ -35,7 +37,6 @@ if ($office === '') {
     json_out(['status' => 'error', 'message' => 'Invalid tab name.'], 422);
 }
 
-// The results page shows applicants with an empty office under REGIONAL OFFICE, so delete those with it.
 $isRegional = ($office === 'REGIONAL OFFICE');
 
 $sqlScores = "DELETE cs FROM candidate_scores cs
@@ -48,7 +49,7 @@ $sqlCandidates = "DELETE FROM candidates
                . ($isRegional ? " OR office_name IS NULL OR TRIM(office_name) = ''" : "") . ")";
 
 try {
-    ensure_schema($conn); // creates removed_tabs if needed (before the transaction: CREATE TABLE commits implicitly)
+    ensure_schema($conn);
 
     $conn->begin_transaction();
 
@@ -75,6 +76,12 @@ try {
     $stmt->close();
 
     $conn->commit();
+
+    // FIX: audit after commit — candidate_id 0 because it's a tab-wide action
+    audit_log($conn, 0, 'delete', null, [
+        'office'            => $office,
+        'deletedCandidates' => (int)$deletedCandidates
+    ]);
 
     json_out(['status' => 'success', 'deletedCandidates' => max(0, (int)$deletedCandidates)]);
 } catch (Exception $e) {

@@ -1,8 +1,22 @@
 <?php
+// ============================================================
+// login.php — FIXED
+//
+// FIX (Bug 6): remember_admin cookie used SameSite=Strict,
+//              which prevented it from being sent on top-level
+//              navigations from external sites. Changed to Lax.
+// FIX (Bug 7): the remember-me token was never rotated on use,
+//              so a leaked cookie stayed valid for 30 days.
+//              Now rotate on every successful auto-login.
+// FIX:         login_success / login_failure are recorded in the
+//              audit log (Audit.php's ENUM now supports them).
+// ============================================================
+
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/Audit.php';
 
 ensure_auth_schema($conn);
 purge_expired_tokens($conn);
@@ -16,15 +30,36 @@ if (is_logged_in()) {
 $error   = flash_get('error') ?? '';
 $success = flash_get('success');
 
-// Auto-login if a valid "Remember Me" cookie is present
+// ============================================================
+// FIX (Bug 6 + Bug 7): auto-login via remember-me cookie
+//   - SameSite=Lax so top-level navigations still send the cookie
+//   - rotate the token on use so a leak cannot be replayed
+// ============================================================
 if (!empty($_COOKIE['remember_admin'])) {
     $user = verify_remember_token($conn, $_COOKIE['remember_admin']);
     if ($user) {
+        // Rotate: delete the used token, issue a fresh one
+        delete_remember_token($conn, $_COOKIE['remember_admin']);
+        $newToken = issue_remember_token($conn, (int)$user['id'], 30);
+        setcookie('remember_admin', $newToken, [
+            'expires'  => time() + (86400 * 30),
+            'path'     => '/',
+            'secure'   => !empty($_SERVER['HTTPS']),
+            'httponly' => true,
+            'samesite' => 'Lax',     // FIX (Bug 6)
+        ]);
+
         session_regenerate_id(true);
         $_SESSION['user_id']       = (int)$user['id'];
         $_SESSION['username']      = $user['username'];
         $_SESSION['role']          = $user['role'];
         $_SESSION['last_activity'] = time();
+
+        audit_log($conn, 0, 'login_success',
+            null,
+            ['user_id' => (int)$user['id'], 'username' => $user['username'], 'via' => 'remember_me']
+        );
+
         header("Location: " . landing_page_for($user['role']));
         exit;
     } else {
@@ -53,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['last_activity'] = time();
             unset($_SESSION['csrf_token']);
 
+            // FIX (Bug 6): SameSite=Lax so the cookie survives external nav
             if (!empty($_POST['remember'])) {
                 $token = issue_remember_token($conn, (int)$user['id'], 30);
                 setcookie('remember_admin', $token, [
@@ -60,11 +96,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'path'     => '/',
                     'secure'   => !empty($_SERVER['HTTPS']),
                     'httponly' => true,
-                    'samesite' => 'Strict',
+                    'samesite' => 'Lax',
                 ]);
             } else {
                 setcookie('remember_admin', '', time() - 3600, '/', '', !empty($_SERVER['HTTPS']), true);
             }
+
+            audit_log($conn, 0, 'login_success',
+                null,
+                ['user_id' => (int)$user['id'], 'username' => $user['username'], 'via' => 'password']
+            );
 
             header('Location: ' . landing_page_for($user['role']));
             exit;
@@ -73,6 +114,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sleep(1);
             $error = 'Wrong username or password.';
             $lockSecondsLeft = is_locked_out($conn);
+
+            audit_log($conn, 0, 'login_failure',
+                null,
+                ['username_attempted' => $username]
+            );
         }
     }
 }

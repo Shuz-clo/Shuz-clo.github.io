@@ -1,4 +1,22 @@
 <?php
+// ============================================================
+// results_2.php — FIXED (FULL FILE)
+//
+// FIX (Bug 13): normalize_rater() used to return null for any
+//               rater label not in rater_list(), silently
+//               discarding scores for that rater on page load.
+//               Now we normalize the label but keep it, so
+//               legacy/unknown raters still show their scores.
+// FIX (Bug 50): renameBranchTab() was missing syncFromDom()
+//               before modifying groupedData. Unsaved edits in
+//               the tab being renamed were silently lost because
+//               renderAll() → syncFromDom() would try to write
+//               them into a branch key that had just been
+//               deleted from groupedData. Now we snapshot the
+//               DOM first, then move the data, then skip the
+//               redundant re-sync.
+// ============================================================
+
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
@@ -11,6 +29,7 @@ header('Pragma: no-cache');
 
 ensure_schema($conn);
 
+// ---------- Load stored rater orders (per office/position) ----------
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
@@ -18,7 +37,7 @@ try {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
 
-// Canonicalize stored-order keys
+// Canonicalize stored-order keys so they match canonical_position_title()
 $canonicalStoredOrders = [];
 foreach ($storedOrders as $off => $positions) {
     foreach ($positions as $pos => $raters) {
@@ -35,6 +54,7 @@ foreach ($storedOrders as $off => $positions) {
 }
 $storedOrders = $canonicalStoredOrders;
 
+// ---------- Load all candidate_scores rows ----------
 $scoreMap = [];
 $sr = $conn->query("SELECT candidate_id, rater, psycho, potential FROM candidate_scores");
 if ($sr) {
@@ -46,6 +66,7 @@ if ($sr) {
     }
 }
 
+// ---------- Load candidates and group them by office ----------
 $result = $conn->query("SELECT * FROM candidates ORDER BY office_name ASC, interview_date ASC, id ASC");
 
 $groupedCandidates = [];
@@ -57,6 +78,8 @@ if ($result && $result->num_rows > 0) {
         if (!isset($groupedCandidates[$office])) $groupedCandidates[$office] = [];
 
         $id = (int)$row['id'];
+
+        // Grab the legacy score columns — used only if candidate_scores is empty for this candidate
         $legacyP = []; $legacyT = [];
         foreach (['core_avg', 'org_avg', 'psycho_extra1', 'psycho_extra2', 'psycho_extra3', 'psycho_extra4'] as $col) {
             $legacyP[] = isset($row[$col]) && $row[$col] !== null ? (float)$row[$col] : null;
@@ -78,6 +101,7 @@ if ($result && $result->num_rows > 0) {
     }
 }
 
+// ---------- Ensure the standard offices exist as tabs, in this order ----------
 $defaultOffices = ['REGIONAL OFFICE', 'PENRO ILOILO', 'PENRO CAPIZ', 'PENRO AKLAN', 'PENRO ANTIQUE', 'PENRO GUIMARAS', 'PENRO NEGROS OCCIDENTAL'];
 
 $orderedOffices = [];
@@ -89,10 +113,12 @@ foreach ($groupedCandidates as $office => $list) {
 }
 $groupedCandidates = $orderedOffices;
 
+// Add any stored-order offices that don't yet have candidates
 foreach (array_keys($storedOrders) as $storedOffice) {
     if (!isset($groupedCandidates[$storedOffice])) $groupedCandidates[$storedOffice] = [];
 }
 
+// Hide tabs the admin previously deleted
 try {
     foreach (removed_tab_list($conn) as $removedOffice) {
         if (isset($groupedCandidates[$removedOffice]) && count($groupedCandidates[$removedOffice]) === 0) {
@@ -103,6 +129,7 @@ try {
     error_log('results_2 removed tabs load error: ' . $e->getMessage());
 }
 
+// ---------- Load header labels (editable by the admin) ----------
 $headerLabels = [
     'hash' => 'NO.', 'name' => 'NAME OF APPLICANT / CANDIDATE', 'psychoGroup' => 'PSYCHO-SOCIAL ATTRIBUTES', 'potentialGroup' => 'POTENTIAL ATTRIBUTES',
     'core' => 'CORE', 'org' => 'ORG', 'psychoExtra1' => 'R1', 'psychoExtra2' => 'R2', 'psychoExtra3' => 'R3', 'psychoExtra4' => 'R4',
@@ -136,16 +163,28 @@ try {
             'remarks'         => $settingsRow['hdr_remarks'] ?? 'REMARKS',
         ];
     }
-} catch (Exception $e) {}
+} catch (Exception $e) {
+    // Non-fatal; keep the defaults
+}
 
+// ============================================================
+// FIX (Bug 13): normalize_rater() used to return null for any
+// rater label not in rater_list(), silently discarding scores
+// for that rater on page load. Now we normalize the label but
+// keep it, so legacy/unknown raters still show their scores.
+// ============================================================
 function normalize_rater(string $label): ?string {
     $l = strtoupper(trim($label));
+    if ($l === '') return null;
     $l = preg_replace('/[\s_]+/', '-', $l);
     if ($l === 'ENDUSER') $l = 'END-USER';
-    return in_array($l, rater_list(), true) ? $l : null;
+    return $l; // keep unknown labels — dropping them loses data
 }
+
+// ---------- Migrate legacy scores into the per-rater structure ----------
 $legacyPLabels = [$headerLabels['core'], $headerLabels['org'], $headerLabels['psychoExtra1'], $headerLabels['psychoExtra2'], $headerLabels['psychoExtra3'], $headerLabels['psychoExtra4']];
 $legacyTLabels = [$headerLabels['func'], $headerLabels['lead'], $headerLabels['potentialExtra1'], $headerLabels['potentialExtra2'], $headerLabels['potentialExtra3'], $headerLabels['potentialExtra4']];
+
 foreach ($groupedCandidates as $officeKey => $list) {
     foreach ($list as $i => $cand) {
         if (empty($cand['scores'])) {
@@ -156,7 +195,9 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 if ($rp !== null && $cand['_legacy']['p'][$k] !== null) $sc[$rp]['p'] = $cand['_legacy']['p'][$k];
                 if ($rt !== null && $cand['_legacy']['t'][$k] !== null) $sc[$rt]['t'] = $cand['_legacy']['t'][$k];
             }
-            foreach ($sc as $r => $v) { $sc[$r] = ['p' => $v['p'] ?? null, 't' => $v['t'] ?? null]; }
+            foreach ($sc as $r => $v) {
+                $sc[$r] = ['p' => $v['p'] ?? null, 't' => $v['t'] ?? null];
+            }
             $groupedCandidates[$officeKey][$i]['scores'] = $sc;
         }
         unset($groupedCandidates[$officeKey][$i]['_legacy']);
@@ -985,6 +1026,15 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
         }
 
+        // ============================================================
+        // FIX (Bug 50): renameBranchTab() was missing syncFromDom()
+        // before modifying groupedData. Unsaved edits in the tab
+        // being renamed were silently lost because renderAll() →
+        // syncFromDom() would try to write them into a branch key
+        // that had just been deleted from groupedData. Now we
+        // snapshot the DOM first, then move the data, then skip
+        // the redundant re-sync.
+        // ============================================================
         function renameBranchTab(el) {
             const container = el.closest('.table-container');
             const oldBranch = container.getAttribute('data-office');
@@ -1000,10 +1050,17 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 return;
             }
 
+            // FIX (Bug 50): capture any unsaved edits from the DOM
+            // BEFORE we move the data.
+            syncFromDom();
+
             groupedData[newBranch] = groupedData[oldBranch] || [];
             hiddenTabs.add(oldBranch);
             delete groupedData[oldBranch];
             if (activeTabOffice === oldBranch) activeTabOffice = newBranch;
+
+            // We've already synced; don't let renderAll() overwrite with stale DOM.
+            skipNextSync = true;
             renderAll();
         }
 

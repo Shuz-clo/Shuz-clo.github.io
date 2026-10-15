@@ -1,23 +1,37 @@
 <?php
-function auth_ensure_column(mysqli $conn, string$table, string $column, string$definitionSql): void {
+// ============================================================
+// AuthSchema.php — FIXED
+//
+// FIX (Bug 41): missing spaces in type hints — string$table,
+//              string$definitionSql. Cosmetic but sloppy.
+// FIX:         register_failed_attempt() hardcoded
+//              "INTERVAL 15 MINUTE" and "attempts >= 5" instead
+//              of using AUTH_LOCKOUT_MINUTES / AUTH_MAX_ATTEMPTS.
+//              Now the constants actually control the behaviour.
+// ============================================================
+
+function auth_ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
     try {
         // Sanitize table and column names (allow only alphanumeric characters and underscores)
-        if (!preg_match('/^[a-zA-Z0-9_]+$/',$table) || !preg_match('/^[a-zA-Z0-9_]+$/',$column)) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) {
             return;
         }
 
-        $stmt =$conn->prepare("SELECT 1 FROM information_schema.COLUMNS 
+        $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS 
                                 WHERE TABLE_SCHEMA = DATABASE() 
                                 AND TABLE_NAME = ? 
                                 AND COLUMN_NAME = ? LIMIT 1");
-        $stmt->bind_param('ss',$table, $column);$stmt->execute();
-        $exists =$stmt->get_result();
+        $stmt->bind_param('ss', $table, $column);
+        $stmt->execute();
+        $exists = $stmt->get_result();
 
-        if ($exists && $exists->num_rows === 0) {$conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definitionSql");
+        if ($exists && $exists->num_rows === 0) {
+            $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definitionSql");
         }
         $stmt->close();
     } catch (Exception $e) {
         // Table doesn't exist yet — nothing to add a column to.
+        error_log("auth_ensure_column {$table}.{$column}: " . $e->getMessage());
     }
 }
 
@@ -37,8 +51,6 @@ function ensure_auth_schema(mysqli $conn): void {
         expires_at DATETIME NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) DEFAULT CHARSET=utf8mb4");
-    // In case this table already existed from an earlier, admin-only version
-    
 
     $conn->query("CREATE TABLE IF NOT EXISTS login_attempts (
         ip VARCHAR(45) PRIMARY KEY,
@@ -207,6 +219,10 @@ function register_failed_attempt(mysqli $conn): void {
     $ip  = client_ip();
     $now = date('Y-m-d H:i:s');
 
+    // FIX: use the constants instead of hardcoded 15 / 5
+    $maxAttempts = AUTH_MAX_ATTEMPTS;
+    $lockMinutes = AUTH_LOCKOUT_MINUTES;
+
     // 1. Reset expired lockouts back to 0 before evaluating new attempt
     $stmt = $conn->prepare("UPDATE login_attempts 
                             SET attempts = 0, locked_until = NULL 
@@ -222,11 +238,11 @@ function register_failed_attempt(mysqli $conn): void {
     $stmt->execute();
     $stmt->close();
 
-    // 3. Lock out if threshold reached (e.g., 5 attempts)
+    // 3. Lock out if threshold reached — FIX: interval and threshold are now bound params
     $stmt = $conn->prepare("UPDATE login_attempts 
-                            SET locked_until = DATE_ADD(?, INTERVAL 15 MINUTE) 
-                            WHERE ip = ? AND attempts >= 5");
-    $stmt->bind_param('ss', $now, $ip);
+                            SET locked_until = DATE_ADD(?, INTERVAL ? MINUTE) 
+                            WHERE ip = ? AND attempts >= ?");
+    $stmt->bind_param('siii', $now, $lockMinutes, $ip, $maxAttempts);
     $stmt->execute();
     $stmt->close();
 }

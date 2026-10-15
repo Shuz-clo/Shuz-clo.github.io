@@ -1,4 +1,12 @@
 <?php
+// ============================================================
+// manage_users.php — FIXED
+//
+// FIX (Bug 2): the <p class="hint"> paragraph contained stray
+//              HTML (a dangling title="..." attribute and an
+//              orphan </div>). Repaired the markup.
+// ============================================================
+
 // Admin-only user management: add accounts, change roles, reset passwords, delete.
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
@@ -56,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     try {
-if ($action === 'create') {
+        if ($action === 'create') {
             $username = trim($_POST['username'] ?? '');
             $password = $_POST['password'] ?? '';
             $role     = $_POST['role'] ?? '';
@@ -142,6 +150,8 @@ if ($action === 'create') {
                 $stmt->execute();
                 $stmt->close();
                 $conn->commit();
+                audit_log($conn, 0, 'delete',
+                    ['user_id' => $id, 'username' => $target['username']], null);
                 flash('success', "Account '" . $target['username'] . "' deleted.");
             }
 
@@ -286,9 +296,10 @@ $csrf = csrf_token();
             </div>
             <button type="submit">Create account</button>
         </form>
+
+        <!-- FIX (Bug 2): repaired markup; was previously broken by a stray title="..." and an orphan </div> -->
         <p class="hint">
-            title="3 to 100 characters: letters (including ñ), numbers, spaces, dots, and hyphens." autocomplete="off">
-            </div> Passwords: <?php echo MIN_PASSWORD_LENGTH; ?>-<?php echo MAX_PASSWORD_LENGTH; ?> characters.
+            Passwords: <?php echo MIN_PASSWORD_LENGTH; ?>-<?php echo MAX_PASSWORD_LENGTH; ?> characters.
             Give the username and password to the person yourself. Passwords can't be viewed later, only reset.
         </p>
     </div>

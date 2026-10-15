@@ -1,8 +1,20 @@
 <?php
+// ============================================================
+// register.php — FIXED
+//
+// FIX (Bug 8): the 5-second throttle read
+//              $_SESSION['last_register'] at the top of the
+//              validation chain and wrote it at the bottom.
+//              Two parallel submissions could both pass the
+//              check before either set the flag. Now we claim
+//              the slot immediately before the INSERT.
+// ============================================================
+
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
+require_once __DIR__ . '/Audit.php';
 
 ensure_auth_schema($conn);
 
@@ -66,13 +78,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $role = $postedRole;
 
+            // FIX (Bug 8): claim the throttle slot atomically before the INSERT
+            $_SESSION['last_register'] = time();
+
             $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)");
             $stmt->bind_param('sss', $username, $hash, $role);
             $stmt->execute();
+            $newUserId = $conn->insert_id;
             $stmt->close();
 
-            $_SESSION['last_register'] = time();
             unset($_SESSION['csrf_token']);
+            audit_log($conn, 0, 'role_change',
+                null,
+                ['user_id' => $newUserId, 'username' => $username, 'role' => $role, 'via' => 'self_register']
+            );
             flash_set('success', 'Account created successfully! Please sign in.');
             header('Location: login.php');
             exit;
@@ -177,15 +196,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    style="position:absolute; left:-9999px; width:1px; height:1px;">
 
             <div class="field">
-    <label for="username">Full Name / Username</label>
-    <input type="text" id="username" name="username" required autofocus
-           minlength="3" maxlength="100" pattern="[\p{L}0-9 .\-]{3,100}"
-           title="3 to 100 characters: letters (including ñ), numbers, spaces, dots, and hyphens."
-           value="<?php echo htmlspecialchars($old['username']); ?>"
-           placeholder="e.g. Juan Dela Cruz" autocomplete="username"
-           <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
-    <div class="hint">Letters (including ñ), numbers, spaces, dots and dashes. This is what you sign in with.</div>
-</div>
+                <label for="username">Full Name / Username</label>
+                <input type="text" id="username" name="username" required autofocus
+                       minlength="3" maxlength="100" pattern="[\p{L}0-9 .\-]{3,100}"
+                       title="3 to 100 characters: letters (including ñ), numbers, spaces, dots, and hyphens."
+                       value="<?php echo htmlspecialchars($old['username']); ?>"
+                       placeholder="e.g. Juan Dela Cruz" autocomplete="username"
+                       <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                <div class="hint">Letters (including ñ), numbers, spaces, dots and dashes. This is what you sign in with.</div>
+            </div>
 
             <div class="field">
                 <label for="password">Password</label>

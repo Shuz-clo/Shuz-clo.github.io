@@ -1,4 +1,16 @@
 <?php
+// ============================================================
+// Raters.php — FIXED
+//
+// FIX (Bug 9):  ensure_column() used real_escape_string on
+//               table/column identifiers (real_escape_string is
+//               for string literals, not identifiers). Now uses
+//               a prepared statement, matching
+//               AuthSchema::auth_ensure_column.
+// FIX (Bug 10): empty catch in ensure_column() swallowed every
+//               error silently. Now logged.
+// ============================================================
+
 // ONE shared list of raters.
 if (!function_exists('rater_list')) {
     function rater_list(): array {
@@ -8,13 +20,23 @@ if (!function_exists('rater_list')) {
 
 function ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
     try {
-        $exists = $conn->query("SELECT 1 FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . $conn->real_escape_string($table) . "'
-            AND COLUMN_NAME = '" . $conn->real_escape_string($column) . "' LIMIT 1");
+        // FIX (Bug 9): sanitize identifiers, then use a prepared statement
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) {
+            return;
+        }
+        $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+        $stmt->bind_param('ss', $table, $column);
+        $stmt->execute();
+        $exists = $stmt->get_result();
         if ($exists && $exists->num_rows === 0) {
             $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definitionSql");
         }
-    } catch (Exception $e) {}
+        $stmt->close();
+    } catch (Exception $e) {
+        // FIX (Bug 10): log instead of swallowing silently
+        error_log("ensure_column {$table}.{$column}: " . $e->getMessage());
+    }
 }
 
 function ensure_schema(mysqli $conn): void {

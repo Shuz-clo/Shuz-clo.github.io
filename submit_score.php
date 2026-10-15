@@ -1,8 +1,25 @@
 <?php
+// ============================================================
+// submit_score.php — FIXED
+//
+// FIX (Bug 24): refresh_session_user() issues a Location: header
+//               and exit() if the account was deleted. On a JSON
+//               fetch that produced a 302 → HTML login page.
+//               Inlined the check here so JSON callers get JSON.
+// FIX (Bug 2):  office_name was copied verbatim into
+//               office_location (VARCHAR(100)) without
+//               truncation. Now truncated to 100 chars.
+// FIX (Bug 3):  $existing was reused for both the candidate row
+//               and the rater-order array. Renamed the second
+//               use to $existingRaters.
+// FIX:          audit_log() called after a successful commit.
+// ============================================================
+
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_once __DIR__ . '/Raters.php';
+require_once __DIR__ . '/Audit.php';
 
 $wantsJson = strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
 
@@ -24,7 +41,20 @@ if (!is_logged_in()) {
     respond(false, 'Please log in again.', 401, $wantsJson);
 }
 
-refresh_session_user();
+// ============================================================
+// FIX (Bug 24): inline session refresh that respects $wantsJson
+// ============================================================
+if (isset($conn) && $conn instanceof mysqli && function_exists('find_user_by_id')) {
+    $freshUser = find_user_by_id($conn, (int)$_SESSION['user_id']);
+    if ($freshUser === null) {
+        $_SESSION = [];
+        session_regenerate_id(true);
+        respond(false, 'Your account is no longer available. Please log in again.', 401, $wantsJson);
+    }
+    $_SESSION['username'] = $freshUser['username'];
+    $_SESSION['role']     = $freshUser['role'];
+}
+
 ensure_schema($conn);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -57,6 +87,9 @@ $rater_name     = mb_substr(trim($_POST['rater_name'] ?? ''), 0, 255);
 
 if ($position_title === '') $position_title = 'LMO I';
 if ($interview_date === '') $interview_date = date('F d, Y');
+
+// FIX (Bug 2): office_location column is VARCHAR(100)
+$office_location = mb_substr($office_name, 0, 100);
 
 if ($candidate_name === '') {
     respond(false, 'Candidate name is required.', 422, $wantsJson);
@@ -137,7 +170,8 @@ $evidenceJson = count($evidence) > 0 ? json_encode($evidence, JSON_UNESCAPED_UNI
 
 $columns = ['candidate_name', 'position_title', 'office_location', 'office_name', 'interview_date', 'rater_name',
             'core_avg', 'org_avg', 'lead_avg', 'func_avg', 'evidence_json', 'psycho_ave', 'potential_ave'];
-$values  = [$candidate_name, $position_title, $office_name, $office_name, $interview_date, $rater_name,
+// FIX (Bug 2): use $office_location (truncated) for the office_location column
+$values  = [$candidate_name, $position_title, $office_location, $office_name, $interview_date, $rater_name,
             $core_avg, $org_avg, $lead_avg, $func_avg, $evidenceJson, $psycho_score, $potential_score];
 $types   = 'ssssss' . 'dddd' . 's' . 'dd';
 
@@ -158,17 +192,19 @@ try {
         ORDER BY id DESC LIMIT 1 FOR UPDATE");
     $find->bind_param('sss', $candidate_name, $office_name, $position_title);
     $find->execute();
-    $existing = $find->get_result()->fetch_assoc();
+    $existingCandidate = $find->get_result()->fetch_assoc();
     $find->close();
 
-    if ($existing) {
-        $candidateId = (int)$existing['id'];
+    if ($existingCandidate) {
+        $candidateId = (int)$existingCandidate['id'];
+        $isEdit = true;
     } else {
         $stmt = $conn->prepare($sql);
         $stmt->bind_param($types, ...$values);
         $stmt->execute();
         $candidateId = $conn->insert_id;
         $stmt->close();
+        $isEdit = false;
     }
 
     $stmtScore = $conn->prepare("INSERT INTO candidate_scores (candidate_id, rater, psycho, potential)
@@ -180,12 +216,25 @@ try {
     }
     $stmtScore->close();
 
-    $existing = position_rater_order($conn, $office_name, $position_title);
-    $merged   = array_values(array_unique(array_merge($existing, $selectedRaters)));
+    // FIX (Bug 3): renamed to $existingRaters for clarity
+    $existingRaters = position_rater_order($conn, $office_name, $position_title);
+    $merged         = array_values(array_unique(array_merge($existingRaters, $selectedRaters)));
     record_rater_order($conn, $office_name, $position_title, $merged);
 
     $conn->commit();
     $_SESSION['last_submit'] = time();
+
+    // FIX: audit after successful commit
+    audit_log($conn, $candidateId, $isEdit ? 'edit' : 'submit',
+        null,
+        [
+            'candidate_name' => $candidate_name,
+            'position_title' => $position_title,
+            'office_name'    => $office_name,
+            'raters'         => $selectedRaters
+        ]
+    );
+
     respond(true, 'Saved.', 200, $wantsJson);
 } catch (Exception $e) {
     $conn->rollback();

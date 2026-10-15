@@ -1,4 +1,11 @@
 <?php
+// ============================================================
+// delete_candidate.php — FIXED
+//
+// FIX: Audit.php required, candidate details fetched BEFORE
+//      deletion, audit_log() called after a successful commit.
+// ============================================================
+
 // Buffer everything so a stray PHP warning can never corrupt the JSON reply.
 ob_start();
 
@@ -7,6 +14,7 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_admin();
 require_once __DIR__ . '/Raters.php';
+require_once __DIR__ . '/Audit.php';
 
 function json_out(array $payload, int $code = 200): void {
     if (ob_get_length()) ob_clean();
@@ -32,6 +40,13 @@ if ($id <= 0) {
 try {
     ensure_schema($conn);
 
+    // FIX: snapshot the candidate for the audit trail
+    $stmtInfo = $conn->prepare("SELECT candidate_name, office_name, position_title FROM candidates WHERE id = ? LIMIT 1");
+    $stmtInfo->bind_param('i', $id);
+    $stmtInfo->execute();
+    $candInfo = $stmtInfo->get_result()->fetch_assoc();
+    $stmtInfo->close();
+
     $conn->begin_transaction();
 
     $sc = $conn->prepare("DELETE FROM candidate_scores WHERE candidate_id = ?");
@@ -48,9 +63,11 @@ try {
     $conn->commit();
 
     if ($deleted < 1) {
-        // Nothing matched: it was already gone (or the id was wrong). Report it instead of pretending.
         json_out(['status' => 'error', 'message' => 'That applicant was not found in the database (it may already be deleted). Refresh the page.']);
     }
+
+    // FIX: audit after commit
+    audit_log($conn, $id, 'delete', $candInfo ?: null, null);
 
     json_out(['status' => 'success']);
 } catch (Exception $e) {

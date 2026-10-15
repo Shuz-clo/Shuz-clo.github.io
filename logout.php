@@ -1,8 +1,27 @@
 <?php
+// ============================================================
+// logout.php — FIXED
+//
+// FIX (Bug 1): the entire contents of this file were duplicated
+//              (two identical blocks back-to-back). Removed the
+//              duplicate.
+// FIX:         writes a 'logout' audit entry before destroying
+//              the session.
+// ============================================================
+
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
+require_once __DIR__ . '/Audit.php';
+
+// Audit the logout while we still have a session to read from.
+if (is_logged_in()) {
+    audit_log($conn, 0, 'logout',
+        null,
+        ['user_id' => current_user_id(), 'username' => $_SESSION['username'] ?? null]
+    );
+}
 
 // Delete "Remember Me" token from database if present
 if (!empty($_COOKIE['remember_admin'])) {
@@ -44,4 +63,3 @@ header("Expires: 0");
 
 header("Location: login.php");
 exit();
-?>

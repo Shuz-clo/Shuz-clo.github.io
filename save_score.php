@@ -1,4 +1,13 @@
 <?php
+// ============================================================
+// save_score.php — FIXED
+//
+// FIX (Bug 2): office_name was copied verbatim into
+//              office_location (VARCHAR(100)). Now truncated.
+// FIX:         audit entries collected during the loop and
+//              written via audit_log() after a successful commit.
+// ============================================================
+
 ob_start();
 
 require_once 'db.php';
@@ -6,6 +15,7 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_admin();
 require_once __DIR__ . '/Raters.php';
+require_once __DIR__ . '/Audit.php';
 
 ensure_schema($conn);
 
@@ -53,14 +63,18 @@ try {
         VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE psycho = VALUES(psycho), potential = VALUES(potential)");
 
-    $savedIds = [];
+    $savedIds        = [];
     $orderByPosition = [];
+    $auditEntries    = [];
 
     foreach ($data['candidates'] as $c) {
         $id        = (int)($c['id'] ?? 0);
         $tempIndex = (int)($c['tempIndex'] ?? 0);
         $name      = mb_substr(trim($c['name'] ?? ''), 0, 255);
         $office    = mb_substr(trim($c['office'] ?? 'General Branch'), 0, 255);
+
+        // FIX (Bug 2): truncate for the office_location column
+        $officeLoc = mb_substr($office, 0, 100);
 
         $position  = mb_substr(trim($c['position'] ?? ''), 0, 255);
         if ($position === '') $position = 'UNASSIGNED';
@@ -87,15 +101,17 @@ try {
         }
 
         if ($id > 0) {
-            $stmtUpdate->bind_param("ssssssi", $name, $office, $office, $position, $interviewDate, $remarks, $id);
+            $stmtUpdate->bind_param("ssssssi", $name, $office, $officeLoc, $position, $interviewDate, $remarks, $id);
             $stmtUpdate->execute();
             $candidateId = $id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $id];
+            $action = 'edit';
         } elseif ($name !== '') {
-            $stmtInsert->bind_param("ssssss", $name, $office, $office, $position, $interviewDate, $remarks);
+            $stmtInsert->bind_param("ssssss", $name, $office, $officeLoc, $position, $interviewDate, $remarks);
             $stmtInsert->execute();
             $candidateId = $conn->insert_id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $candidateId];
+            $action = 'submit';
         } else {
             continue;
         }
@@ -107,6 +123,17 @@ try {
             $stmtUpsertScore->bind_param("isdd", $candidateId, $rater, $pt['p'], $pt['t']);
             $stmtUpsertScore->execute();
         }
+
+        $auditEntries[] = [
+            'candidate_id' => $candidateId,
+            'action'       => $action,
+            'new'          => [
+                'candidate_name' => $name,
+                'position_title' => $position,
+                'office_name'    => $office,
+                'raters'         => array_keys($cleanScores)
+            ]
+        ];
     }
 
     $deletedPositions = 0;
@@ -134,6 +161,12 @@ try {
 
             $stmtDelOrder->bind_param('ss', $off, $pos);
             $stmtDelOrder->execute();
+
+            $auditEntries[] = [
+                'candidate_id' => 0,
+                'action'       => 'delete',
+                'new'          => ['office' => $off, 'position' => $pos]
+            ];
         }
         $stmtDelScores->close();
         $stmtDelCands->close();
@@ -279,6 +312,12 @@ try {
     }
 
     $conn->commit();
+
+    // FIX: audit after commit — one entry per touched candidate/position
+    foreach ($auditEntries as $entry) {
+        audit_log($conn, $entry['candidate_id'], $entry['action'], null, $entry['new']);
+    }
+
     json_out([
         'status'           => 'success',
         'savedIds'         => $savedIds,
