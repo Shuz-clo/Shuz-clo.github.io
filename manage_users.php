@@ -1,10 +1,15 @@
 <?php
 // ============================================================
-// manage_users.php — FIXED
+// manage_users.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 2): the <p class="hint"> paragraph contained stray
-//              HTML (a dangling title="..." attribute and an
-//              orphan </div>). Repaired the markup.
+// FIX (Bug 2):  the <p class="hint"> paragraph contained stray
+//               HTML (a dangling title="..." attribute and an
+//               orphan </div>). Repaired the markup.
+// FIX:          added <meta name="chrome" content="nofill"> so
+//               Chrome's Password Manager stops misfiring on the
+//               admin's other tabs. The password fields already
+//               use autocomplete="new-password", so no other
+//               autocomplete changes are needed here.
 // ============================================================
 
 // Admin-only user management: add accounts, change roles, reset passwords, delete.
@@ -183,6 +188,7 @@ $csrf = csrf_token();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="chrome" content="nofill">
     <title>Manage Users</title>
     <style>
         :root {
@@ -297,7 +303,6 @@ $csrf = csrf_token();
             <button type="submit">Create account</button>
         </form>
 
-        <!-- FIX (Bug 2): repaired markup; was previously broken by a stray title="..." and an orphan </div> -->
         <p class="hint">
             Passwords: <?php echo MIN_PASSWORD_LENGTH; ?>-<?php echo MAX_PASSWORD_LENGTH; ?> characters.
             Give the username and password to the person yourself. Passwords can't be viewed later, only reset.

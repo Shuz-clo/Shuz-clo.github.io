@@ -1,4 +1,15 @@
 <?php
+// ============================================================
+// index.php — COMPLETE FIXED FILE
+//
+// FIX: Chrome's Password Manager misfired on Save because it
+//      treated the scoring form as a login form, autofilled a
+//      saved password into a text input, then flagged it as
+//      breached on submit. Added autocomplete="off" to the
+//      <form> and every non-login input, plus the Chrome
+//      "nofill" meta tag.
+// ============================================================
+
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
@@ -25,6 +36,7 @@ require_role(['rater', 'user']);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="chrome" content="nofill">
     <title>DENR Interview Scoring Sheet</title>
     <link rel="stylesheet" href="style.css">
     <style>
@@ -235,9 +247,8 @@ require_role(['rater', 'user']);
 </div>
 <?php endif; ?>
 
-<form id="scoringForm" action="submit_score.php" method="POST">
-<!-- Honeypot (bots fill this, humans never see it) -->
-<input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px;">
+<form id="scoringForm" action="submit_score.php" method="POST" autocomplete="off">
+<input type="text" name="_hp_field" tabindex="-1" autocomplete="new-password" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px;">
 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
 
 <table>
@@ -247,17 +258,14 @@ require_role(['rater', 'user']);
         <col class="col-rate">
     </colgroup>
 
-    <!-- Top Branding Headers -->
     <tr><td colspan="3" class="header-cell">Department of Environment and Natural Resources</td></tr>
     <tr><td colspan="3" class="header-cell">Region VI, Western Visayas</td></tr>
     <tr><td colspan="3" class="header-cell">Regional Human Resource Merit Promotion and Selection Board (RHRMPSB)</td></tr>
 
-    <!-- Alt + Double-Click Trigger on INTERVIEW SCORING SHEET -->
     <tr><td colspan="3" class="header-title secret-trigger" ondblclick="goToAdminResults(event)">INTERVIEW SCORING SHEET</td></tr>
 
-    <!-- Candidate Info -->
     <tr>
-        <td class="info-cell">NAME: <input type="text" name="candidate_name" placeholder="" required style="width: 75%; display: inline-block;"></td>
+        <td class="info-cell">NAME: <input type="text" name="candidate_name" placeholder="" required autocomplete="off" style="width: 75%; display: inline-block;"></td>
         <td colspan="2" class="info-cell">Position:
             <span class="position-wrap">
                 <input type="text" name="position_title" id="position_input"
@@ -285,10 +293,9 @@ require_role(['rater', 'user']);
     </tr>
     <tr>
         <td class="info-cell"></td>
-        <td colspan="2" class="info-cell" style="padding-bottom: 15px;">Date: <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" style="width: 70%; display: inline-block;"></td>
+        <td colspan="2" class="info-cell" style="padding-bottom: 15px;">Date: <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" autocomplete="off" style="width: 70%; display: inline-block;"></td>
     </tr>
 
-    <!-- ===== Core Competencies ===== -->
     <tr class="sec-core">
         <th class="sec-header">Core Competencies</th>
         <th class="sec-header">Evidence</th>
@@ -302,8 +309,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-core">
         <td>Serves as a good role model on DENR values and ethics to staff/peers</td>
-        <td><input type="text" name="evidence_cc1"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="cc1" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_cc1" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc1" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-core">
@@ -313,8 +320,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-core">
         <td>Anticipates, identifies and manages stakeholders’ standards and requirements towards excellent customer service through improving sense of responsibility and competence</td>
-        <td><input type="text" name="evidence_cc2"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="cc2" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_cc2" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc2" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-core">
@@ -324,8 +331,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-core">
         <td>Influences others to observe virtue, goodness, honor, justness and decency in all situations</td>
-        <td><input type="text" name="evidence_cc3"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="cc3" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_cc3" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc3" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-core">
@@ -335,8 +342,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-core">
         <td>Leads in the observance of the principle of transparency and accountability in the workplace</td>
-        <td><input type="text" name="evidence_cc4"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="cc4" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_cc4" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc4" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-core">
@@ -346,11 +353,10 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-core">
         <td>Serves as a good role model in conserving and preserving the environment to peers and staff</td>
-        <td><input type="text" name="evidence_cc5"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="cc5" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_cc5" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="cc5" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
-    <!-- ===== Organizational Competencies ===== -->
     <tr class="sec-right">
         <th class="sec-header">Organizational Competencies</th>
         <th class="sec-header">Advanced</th>
@@ -364,8 +370,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Produces written work from scratch with some guidance while complying to agreed or prescribed standards of communicating with the bureaucracy</td>
-        <td><input type="text" name="evidence_oc1"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="oc1" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_oc1" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc1" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -375,8 +381,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation</td>
-        <td><input type="text" name="evidence_oc2"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="oc2" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_oc2" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc2" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -386,8 +392,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Analyzes appropriateness of office software and equipment in the performance of the assigned tasks. Develops information assets to achieve organizational goals</td>
-        <td><input type="text" name="evidence_oc3"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="oc3" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_oc3" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc3" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -397,8 +403,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Leads in project management activities</td>
-        <td><input type="text" name="evidence_oc4"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="oc4" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_oc4" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc4" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -408,11 +414,10 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Leads the practice of CSW in his/her office/unit</td>
-        <td><input type="text" name="evidence_oc5"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="oc5" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_oc5" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="oc5" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
-    <!-- ===== Leadership Competencies ===== -->
     <tr class="leadership-row sec-right">
         <th class="sec-header"><span id="lcHeadingText">Leadership Competencies</span><span id="lcHint" style="display:none; font-size:11px; font-weight:normal; opacity:0.85;"></span></th>
         <th class="sec-header" id="lcLevelLabel">Basic</th>
@@ -426,8 +431,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="leadership-row sec-right">
         <td id="lcDesc1">Develops office/ service’s strategies and plans based on the DENR’s mission/vision</td>
-        <td><input type="text" name="evidence_lc1"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc1" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_lc1" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc1" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="leadership-row sec-right">
@@ -437,8 +442,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="leadership-row sec-right">
         <td id="lcDesc2">Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation</td>
-        <td><input type="text" name="evidence_lc2"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc2" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_lc2" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc2" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="leadership-row sec-right">
@@ -448,8 +453,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="leadership-row sec-right">
         <td id="lcDesc3">Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals</td>
-        <td><input type="text" name="evidence_lc3"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc3" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_lc3" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc3" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="leadership-row sec-right">
@@ -459,8 +464,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="leadership-row sec-right">
         <td id="lcDesc4">Leads in project management activities</td>
-        <td><input type="text" name="evidence_lc4"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc4" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_lc4" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc4" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="leadership-row sec-right">
@@ -470,11 +475,10 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="leadership-row sec-right">
         <td id="lcDesc5">Leads the practice of CSW in his/her office/unit</td>
-        <td><input type="text" name="evidence_lc5"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc5" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_lc5" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc5" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
-    <!-- ===== Functional Competencies ===== -->
     <tr class="sec-right">
         <th class="sec-header">Functional Competencies</th>
         <th class="sec-header">Advanced</th>
@@ -488,8 +492,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Organizes the preparation of the PENRO operational plans</td>
-        <td><input type="text" name="evidence_pcp1"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="pcp1" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_pcp1" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="pcp1" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -499,8 +503,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Leads the preparation of monitoring and evaluation reports of all DENR-PENRO programs and projects</td>
-        <td><input type="text" name="evidence_pcp2"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="pcp2" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_pcp2" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="pcp2" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -510,8 +514,8 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Leads the characterization of ecosystem and use of planning tools and procedures</td>
-        <td><input type="text" name="evidence_pcp3"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="pcp3" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_pcp3" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="pcp3" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
     <tr class="sec-right">
@@ -521,13 +525,12 @@ require_role(['rater', 'user']);
     </tr>
     <tr class="sec-right">
         <td>Leads the conduct of statistical coordination and data research activities</td>
-        <td><input type="text" name="evidence_pco4"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="pco4" placeholder="0.00"></td>
+        <td><input type="text" name="evidence_pco4" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="pco4" placeholder="0.00" autocomplete="off"></td>
     </tr>
 
-    <!-- Footer -->
     <tr>
-        <td class="transparent">Rated by: <input type="text" name="rater_name" placeholder="Rater Name" style="width: 70%; display: inline-block;"></td>
+        <td class="transparent">Rated by: <input type="text" name="rater_name" placeholder="Rater Name" autocomplete="off" style="width: 70%; display: inline-block;"></td>
         <td class="transparent" colspan="2">Raters:
             <details id="raterDropdown" style="position: relative; display: inline-block; width: 60%; vertical-align: middle;">
                 <summary id="raterSummary" style="cursor: pointer; border-bottom: 1px solid #000; padding: 4px; list-style: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-- Select Raters --</summary>
@@ -554,15 +557,6 @@ require_role(['rater', 'user']);
 </form>
 
 <script>
-    // =========================================================================
-    // ALL_POSITIONS: every position title that appears in the two plantilla
-    // Excel files (POSITIONS_COMPETENCY LEVEL.xlsx, Interview Rating_2026.xlsx).
-    // The "(scrap & build)", "(Continued service accredited by CSC)" and
-    // similar vacancy artifacts are intentionally stripped out — those aren't
-    // positions you can actually interview for.
-    // Edit this one array to add/remove positions; the dropdown and the
-    // canonical lookup both read from it.
-    // =========================================================================
     const ALL_POSITIONS = [
         "Accountant I",
         "Accountant II",
@@ -675,19 +669,13 @@ require_role(['rater', 'user']);
         "Zoology Technician"
     ];
 
-    // =========================================================================
-    // Position autocomplete
-    // =========================================================================
     const positionInput    = document.getElementById('position_input');
     const positionDropdown = document.getElementById('positionDropdown');
 
-    // Letters + digits only, uppercase. Used to match "plo iii" == "PLO III" == "PLOIII".
     function posCompact(s) {
         return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     }
 
-    // Short forms people commonly type -> canonical title from ALL_POSITIONS.
-    // (Any typed variant that doesn't match one of these still gets stored as-is.)
     const POSITION_ALIASES = {
         'ATY5': 'Attorney V', 'ATTY5': 'Attorney V', 'ATTORNEYV': 'Attorney V',
         'ATY4': 'Attorney IV', 'ATTY4': 'Attorney IV', 'ATTORNEYIV': 'Attorney IV',
@@ -759,8 +747,6 @@ require_role(['rater', 'user']);
         'CARTO3': 'Cartographer III', 'CARTO4': 'Cartographer IV'
     };
 
-    // Build a lookup keyed by compact form, so the user's typed variant resolves
-    // to the exact title from ALL_POSITIONS when it's recognisable.
     const POSITION_LOOKUP = (function () {
         const map = {};
         ALL_POSITIONS.forEach(title => { map[posCompact(title)] = title; });
@@ -773,8 +759,6 @@ require_role(['rater', 'user']);
         return map;
     })();
 
-    // "atty 5", "ATTY-5", "atty5" all become "ATTY5" -> look up -> "Attorney V".
-    // A title that isn't in the list is returned unchanged.
     function canonicalPositionTitle(typed) {
         const raw = String(typed || '').trim();
         if (raw === '') return '';
@@ -783,7 +767,6 @@ require_role(['rater', 'user']);
         return raw;
     }
 
-    // ---- Dropdown behaviour ----
     let activeIndex = -1;
 
     function renderPositionDropdown(filter) {
@@ -807,7 +790,6 @@ require_role(['rater', 'user']);
             item.setAttribute('role', 'option');
             item.textContent = title;
             item.addEventListener('mousedown', (e) => {
-                // mousedown fires before blur; preventDefault keeps the input focused.
                 e.preventDefault();
                 positionInput.value = title;
                 positionDropdown.classList.remove('open');
@@ -854,7 +836,6 @@ require_role(['rater', 'user']);
                 closePositionDropdown();
                 applyFormLayout();
             } else {
-                // No highlight: accept whatever was typed (canonicalise if possible)
                 positionInput.value = canonicalPositionTitle(positionInput.value);
                 closePositionDropdown();
                 applyFormLayout();
@@ -864,9 +845,7 @@ require_role(['rater', 'user']);
         }
     });
 
-    // Snap to the exact canonical title when the user leaves the field.
     positionInput.addEventListener('blur', () => {
-        // Delay so a click on a dropdown item still registers.
         setTimeout(() => {
             if (!positionDropdown.contains(document.activeElement)) {
                 positionInput.value = canonicalPositionTitle(positionInput.value);
@@ -876,20 +855,15 @@ require_role(['rater', 'user']);
         }, 120);
     });
 
-    // Close on outside click
     document.addEventListener('click', (e) => {
         if (!positionDropdown.contains(e.target) && e.target !== positionInput) {
             closePositionDropdown();
         }
     });
 
-    // =========================================================================
-    // Leadership level rules
-    // =========================================================================
     const LEADERSHIP_HIDDEN_POSITIONS = ["SVEMS"];
 
     const LEADERSHIP_LEVELS = [
-        // INTERMEDIATE
         ["Planning Officer V", "I"],
         ["Chief Administrative Officer", "I"],
         ["Attorney V", "I"],
@@ -899,7 +873,6 @@ require_role(['rater', 'user']);
         ["Provincial Environment & Natural Resources Officer", "I"],
         ["Community Environment & Natural Resources Officer", "I"],
         ["Community Environment & Natural Resources Officer (CENRO)", "I"],
-        // BASIC
         ["Senior Communications Development Officer", "B"],
         ["Planning Officer IV", "B"],
         ["Planning Officer III", "B"],
@@ -1009,9 +982,6 @@ require_role(['rater', 'user']);
         if (typeof markEdited === 'function') markEdited();
     }
 
-    // =========================================================================
-    // Rating cells: clamp to 0..10 while typing
-    // =========================================================================
     document.getElementById('scoringForm').addEventListener('input', e => {
         const el = e.target;
         if (el.type === 'number' && /^(cc|oc|lc|pcp|pco)\d$/.test(el.name || '')) {
@@ -1020,14 +990,10 @@ require_role(['rater', 'user']);
         }
     });
 
-    // Restore default layout after a form reset
     document.getElementById('scoringForm').addEventListener('reset', () => {
         setTimeout(() => { positionInput.value = ''; closePositionDropdown(); applyFormLayout(); }, 0);
     });
 
-    // =========================================================================
-    // Rater checkbox dropdown (keeps the order they were ticked)
-    // =========================================================================
     let raterClickOrder = [];
 
     function selectedRaters() {
@@ -1064,19 +1030,16 @@ require_role(['rater', 'user']);
         if (dd && !dd.contains(e.target)) dd.open = false;
     });
 
-    // Secret Admin Shortcut: Hold ALT while double-clicking "INTERVIEW SCORING SHEET"
     function goToAdminResults(event) {
         if (event.altKey) {
             window.location.href = 'results_2.php';
         }
     }
 
-    // Save button: saves in the background without redirecting
     function saveOnly() {
         const form = document.getElementById('scoringForm');
         const btn  = document.getElementById('saveBtn');
 
-        // Snap to the canonical title before submitting, so aliases like "atty 5" get stored as "Attorney V"
         positionInput.value = canonicalPositionTitle(positionInput.value);
 
         updateRaterSummary();

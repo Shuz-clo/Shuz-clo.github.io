@@ -1,20 +1,18 @@
 <?php
 // ============================================================
-// results_2.php — FIXED (FULL FILE)
+// results_2.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 13): normalize_rater() used to return null for any
-//               rater label not in rater_list(), silently
-//               discarding scores for that rater on page load.
-//               Now we normalize the label but keep it, so
-//               legacy/unknown raters still show their scores.
+// FIX (Bug 13): normalize_rater() dropped unknown rater labels,
+//               losing legacy scores on display. Now returns the
+//               normalized label so nothing is silently discarded.
 // FIX (Bug 50): renameBranchTab() was missing syncFromDom()
-//               before modifying groupedData. Unsaved edits in
-//               the tab being renamed were silently lost because
-//               renderAll() → syncFromDom() would try to write
-//               them into a branch key that had just been
-//               deleted from groupedData. Now we snapshot the
-//               DOM first, then move the data, then skip the
-//               redundant re-sync.
+//               before moving branch data — unsaved edits in the
+//               tab being renamed were lost. Now snapshots the
+//               DOM first and skips the redundant re-sync.
+// FIX:          Added <meta name="chrome" content="nofill"> and
+//               wrapped the sheet in a <form autocomplete="off">
+//               so Chrome's Password Manager stops flagging the
+//               Save action as a breached-password submission.
 // ============================================================
 
 require_once 'db.php';
@@ -37,7 +35,7 @@ try {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
 
-// Canonicalize stored-order keys so they match canonical_position_title()
+// Canonicalize stored-order keys
 $canonicalStoredOrders = [];
 foreach ($storedOrders as $off => $positions) {
     foreach ($positions as $pos => $raters) {
@@ -79,7 +77,6 @@ if ($result && $result->num_rows > 0) {
 
         $id = (int)$row['id'];
 
-        // Grab the legacy score columns — used only if candidate_scores is empty for this candidate
         $legacyP = []; $legacyT = [];
         foreach (['core_avg', 'org_avg', 'psycho_extra1', 'psycho_extra2', 'psycho_extra3', 'psycho_extra4'] as $col) {
             $legacyP[] = isset($row[$col]) && $row[$col] !== null ? (float)$row[$col] : null;
@@ -113,12 +110,10 @@ foreach ($groupedCandidates as $office => $list) {
 }
 $groupedCandidates = $orderedOffices;
 
-// Add any stored-order offices that don't yet have candidates
 foreach (array_keys($storedOrders) as $storedOffice) {
     if (!isset($groupedCandidates[$storedOffice])) $groupedCandidates[$storedOffice] = [];
 }
 
-// Hide tabs the admin previously deleted
 try {
     foreach (removed_tab_list($conn) as $removedOffice) {
         if (isset($groupedCandidates[$removedOffice]) && count($groupedCandidates[$removedOffice]) === 0) {
@@ -129,7 +124,7 @@ try {
     error_log('results_2 removed tabs load error: ' . $e->getMessage());
 }
 
-// ---------- Load header labels (editable by the admin) ----------
+// ---------- Load header labels ----------
 $headerLabels = [
     'hash' => 'NO.', 'name' => 'NAME OF APPLICANT / CANDIDATE', 'psychoGroup' => 'PSYCHO-SOCIAL ATTRIBUTES', 'potentialGroup' => 'POTENTIAL ATTRIBUTES',
     'core' => 'CORE', 'org' => 'ORG', 'psychoExtra1' => 'R1', 'psychoExtra2' => 'R2', 'psychoExtra3' => 'R3', 'psychoExtra4' => 'R4',
@@ -164,7 +159,7 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // Non-fatal; keep the defaults
+    // Non-fatal; keep defaults
 }
 
 // ============================================================
@@ -209,6 +204,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="chrome" content="nofill">
     <title>Master Interview Summary Rating Sheet</title>
     <style>
         * { box-sizing: border-box; }
@@ -500,10 +496,12 @@ foreach ($groupedCandidates as $officeKey => $list) {
 </head>
 <body>
 
+<form id="resultsForm" autocomplete="off" onsubmit="return false;">
+
     <div class="excel-tabs-container">
         <div id="tabs-bar"></div>
         <div class="tab-search">
-            <input type="text" id="candidateSearch" placeholder="Search applicant name...">
+            <input type="text" id="candidateSearch" placeholder="Search applicant name..." autocomplete="off">
             <button type="button" class="btn" onclick="searchCandidate()">🔍 Find</button>
         </div>
     </div>
@@ -516,6 +514,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         <a href="manage_users.php" class="btn">👥 Manage Users</a>
         <a href="logout.php" class="btn" style="background-color: #dc3545; color: white; border-color: #dc3545;">🚪 Logout</a>
     </div>
+
+</form>
 
     <script>
         const groupedData = <?php echo json_encode($groupedCandidates, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -1050,8 +1050,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 return;
             }
 
-            // FIX (Bug 50): capture any unsaved edits from the DOM
-            // BEFORE we move the data.
+            // FIX (Bug 50): capture unsaved edits from the DOM first
             syncFromDom();
 
             groupedData[newBranch] = groupedData[oldBranch] || [];
@@ -1059,7 +1058,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             delete groupedData[oldBranch];
             if (activeTabOffice === oldBranch) activeTabOffice = newBranch;
 
-            // We've already synced; don't let renderAll() overwrite with stale DOM.
+            // Already synced; skip the redundant re-sync in renderAll()
             skipNextSync = true;
             renderAll();
         }
