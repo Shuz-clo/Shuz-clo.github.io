@@ -2,17 +2,13 @@
 // ============================================================
 // manage_users.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 2):  the <p class="hint"> paragraph contained stray
-//               HTML (a dangling title="..." attribute and an
-//               orphan </div>). Repaired the markup.
-// FIX:          added <meta name="chrome" content="nofill"> so
-//               Chrome's Password Manager stops misfiring on the
-//               admin's other tabs. The password fields already
-//               use autocomplete="new-password", so no other
-//               autocomplete changes are needed here.
+// FIX (Bug E): admin-count check for demote/delete now runs
+//              inside a transaction with SELECT … FOR UPDATE on
+//              admin rows, so two concurrent demotions of the
+//              last two admins cannot both succeed.
+// FIX (Bug 2): repaired stray HTML in the hint paragraph.
 // ============================================================
 
-// Admin-only user management: add accounts, change roles, reset passwords, delete.
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
@@ -23,7 +19,7 @@ ensure_auth_schema($conn);
 
 const MANAGE_ROLES = ['admin', 'rater', 'user'];
 const MIN_PASSWORD_LENGTH = 8;
-const MAX_PASSWORD_LENGTH = 72; // bcrypt only uses the first 72 bytes
+const MAX_PASSWORD_LENGTH = 72;
 
 function h($s): string {
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
@@ -43,7 +39,6 @@ function admin_count(mysqli $conn): int {
     return (int)($res->fetch_assoc()['c'] ?? 0);
 }
 
-// Signs the user out of every "Remember me" device
 function revoke_user_tokens(mysqli $conn, int $userId): void {
     $stmt = $conn->prepare("DELETE FROM remember_tokens WHERE user_id = ?");
     $stmt->bind_param('i', $userId);
@@ -102,18 +97,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error', 'Please choose a valid role.');
             } elseif ($id === $myId) {
                 flash('error', "You can't change your own role.");
-            } elseif ($target['role'] === 'admin' && $role !== 'admin' && admin_count($conn) <= 1) {
-                flash('error', 'You must keep at least one admin account.');
             } else {
-                $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ?");
-                $stmt->bind_param('si', $role, $id);
-                $stmt->execute();
-                $stmt->close();
-                revoke_user_tokens($conn, $id);
-                audit_log($conn, 0, 'role_change',
-                    ['user_id' => $id, 'username' => $target['username'], 'role' => $target['role']],
-                    ['user_id' => $id, 'username' => $target['username'], 'role' => $role]);
-                flash('success', "'" . $target['username'] . "' is now $role. It applies at their next login.");
+                $conn->begin_transaction();
+                try {
+                    $conn->query("SELECT id FROM users WHERE role = 'admin' FOR UPDATE");
+                    $adminTotal = admin_count($conn);
+                    if ($target['role'] === 'admin' && $role !== 'admin' && $adminTotal <= 1) {
+                        $conn->rollback();
+                        flash('error', 'You must keep at least one admin account.');
+                    } else {
+                        $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ?");
+                        $stmt->bind_param('si', $role, $id);
+                        $stmt->execute();
+                        $stmt->close();
+                        revoke_user_tokens($conn, $id);
+                        $conn->commit();
+                        audit_log($conn, 0, 'role_change',
+                            ['user_id' => $id, 'username' => $target['username'], 'role' => $target['role']],
+                            ['user_id' => $id, 'username' => $target['username'], 'role' => $role]);
+                        flash('success', "'" . $target['username'] . "' is now $role. It applies at their next login.");
+                    }
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    throw $e;
+                }
             }
 
         } elseif ($action === 'reset_password') {
@@ -132,7 +139,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute();
                 $stmt->close();
                 revoke_user_tokens($conn, $id);
-                // Never log the password or its hash, only the fact that it was reset
                 audit_log($conn, 0, 'password_reset', null, ['user_id' => $id, 'username' => $target['username']]);
                 flash('success', "Password updated for '" . $target['username'] . "'.");
             }
@@ -145,26 +151,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error', 'User not found.');
             } elseif ($id === $myId) {
                 flash('error', "You can't delete your own account.");
-            } elseif ($target['role'] === 'admin' && admin_count($conn) <= 1) {
-                flash('error', 'You must keep at least one admin account.');
             } else {
                 $conn->begin_transaction();
-                revoke_user_tokens($conn, $id);
-                $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
-                $stmt->bind_param('i', $id);
-                $stmt->execute();
-                $stmt->close();
-                $conn->commit();
-                audit_log($conn, 0, 'delete',
-                    ['user_id' => $id, 'username' => $target['username']], null);
-                flash('success', "Account '" . $target['username'] . "' deleted.");
+                try {
+                    $conn->query("SELECT id FROM users WHERE role = 'admin' FOR UPDATE");
+                    $adminTotal = admin_count($conn);
+                    if ($target['role'] === 'admin' && $adminTotal <= 1) {
+                        $conn->rollback();
+                        flash('error', 'You must keep at least one admin account.');
+                    } else {
+                        revoke_user_tokens($conn, $id);
+                        $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+                        $stmt->bind_param('i', $id);
+                        $stmt->execute();
+                        $stmt->close();
+                        $conn->commit();
+                        audit_log($conn, 0, 'delete',
+                            ['user_id' => $id, 'username' => $target['username']], null);
+                        flash('success', "Account '" . $target['username'] . "' deleted.");
+                    }
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    throw $e;
+                }
             }
 
         } else {
             flash('error', 'Unknown action.');
         }
     } catch (Exception $e) {
-        try { $conn->rollback(); } catch (Exception $ignored) {}
         error_log('manage_users error: ' . $e->getMessage());
         flash('error', DEBUG ? $e->getMessage() : 'Something went wrong. Please try again.');
     }
@@ -172,7 +187,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_back();
 }
 
-// ---- Page data ----
 $flash = null;
 if (($m = flash_get('success')) !== null)   $flash = ['type' => 'success', 'msg' => $m];
 elseif (($m = flash_get('error')) !== null) $flash = ['type' => 'error',   'msg' => $m];
@@ -188,7 +202,6 @@ $csrf = csrf_token();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="chrome" content="nofill">
     <title>Manage Users</title>
     <style>
         :root {
