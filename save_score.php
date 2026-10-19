@@ -1,9 +1,11 @@
 <?php
 // ============================================================
-// save_score.php — FIXED
+// save_score.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 2): office_name was copied verbatim into
-//              office_location (VARCHAR(100)). Now truncated.
+// FIX (Bug C): require_admin(true) — JSON-safe 401/403 for
+//              stale sessions.
+// FIX (Bug 2): office_name copied into office_location
+//              (VARCHAR(100)) truncated.
 // FIX:         audit entries collected during the loop and
 //              written via audit_log() after a successful commit.
 // ============================================================
@@ -13,7 +15,7 @@ ob_start();
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
-require_admin();
+require_admin(true);
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/Audit.php';
 
@@ -73,7 +75,6 @@ try {
         $name      = mb_substr(trim($c['name'] ?? ''), 0, 255);
         $office    = mb_substr(trim($c['office'] ?? 'General Branch'), 0, 255);
 
-        // FIX (Bug 2): truncate for the office_location column
         $officeLoc = mb_substr($office, 0, 100);
 
         $position  = mb_substr(trim($c['position'] ?? ''), 0, 255);
@@ -313,7 +314,6 @@ try {
 
     $conn->commit();
 
-    // FIX: audit after commit — one entry per touched candidate/position
     foreach ($auditEntries as $entry) {
         audit_log($conn, $entry['candidate_id'], $entry['action'], null, $entry['new']);
     }
