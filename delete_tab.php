@@ -1,18 +1,16 @@
 <?php
 // ============================================================
-// delete_tab.php — FIXED
+// delete_tab.php — COMPLETE FIXED FILE
 //
-// FIX: Audit.php required; audit_log() called after a successful
-//      commit recording the office and deleted-candidate count.
+// FIX (Bug C): require_admin(true) — JSON-safe 401/403.
 // ============================================================
 
-// Permanently deletes one tab (office) from the results sheet.
 ob_start();
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
-require_role('admin');
+require_admin(true);
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/Audit.php';
 
@@ -77,7 +75,6 @@ try {
 
     $conn->commit();
 
-    // FIX: audit after commit — candidate_id 0 because it's a tab-wide action
     audit_log($conn, 0, 'delete', null, [
         'office'            => $office,
         'deletedCandidates' => (int)$deletedCandidates
