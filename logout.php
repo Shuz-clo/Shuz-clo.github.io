@@ -1,12 +1,11 @@
 <?php
 // ============================================================
-// logout.php — FIXED
+// logout.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 1): the entire contents of this file were duplicated
-//              (two identical blocks back-to-back). Removed the
-//              duplicate.
-// FIX:         writes a 'logout' audit entry before destroying
-//              the session.
+// FIX: session cookie and remember_admin cookie are now
+//      deleted with the array setcookie() signature (same
+//      attributes they were set with), so browsers reliably
+//      clear them including SameSite.
 // ============================================================
 
 require_once 'auth.php';
@@ -15,7 +14,6 @@ require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/Audit.php';
 
-// Audit the logout while we still have a session to read from.
 if (is_logged_in()) {
     audit_log($conn, 0, 'logout',
         null,
@@ -23,35 +21,34 @@ if (is_logged_in()) {
     );
 }
 
-// Delete "Remember Me" token from database if present
 if (!empty($_COOKIE['remember_admin'])) {
     delete_remember_token($conn, $_COOKIE['remember_admin']);
 }
 
-// Clear session variables
-$_SESSION = array();
+$_SESSION = [];
 
-// Delete session cookie properly with exact params
 if (ini_get("session.use_cookies")) {
     $params = session_get_cookie_params();
-    setcookie(
-        session_name(),
-        '',
-        time() - 42000,
-        $params["path"],
-        $params["domain"],
-        $params["secure"],
-        $params["httponly"]
-    );
+    setcookie(session_name(), '', [
+        'expires'  => time() - 42000,
+        'path'     => $params['path'] ?? '/',
+        'domain'   => $params['domain'] ?? '',
+        'secure'   => !empty($params['secure']),
+        'httponly' => !empty($params['httponly']),
+        'samesite' => $params['samesite'] ?? 'Lax',
+    ]);
 }
 
-// Delete persistent remember cookie
-setcookie('remember_admin', '', time() - 3600, '/', '', !empty($_SERVER['HTTPS']), true);
+setcookie('remember_admin', '', [
+    'expires'  => time() - 3600,
+    'path'     => '/',
+    'secure'   => !empty($_SERVER['HTTPS']),
+    'httponly' => true,
+    'samesite' => 'Lax',
+]);
 
-// Destroy existing session
 session_destroy();
 
-// Start fresh session to pass logout notification message
 session_start();
 session_regenerate_id(true);
 
