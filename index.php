@@ -1,7 +1,12 @@
 <?php
 // ============================================================
-// index.php — FINAL
+// index.php — COMPLETE FIXED FILE
 // ============================================================
+
+// FORCE ERRORS TO SHOW
+ini_set('display_errors', '1');
+ini_set('display_startup_errors', '1');
+error_reporting(E_ALL);
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
@@ -821,7 +826,6 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             headers: { 'Accept': 'application/json' }
         })
         .then(response => {
-            // Check if the server returned an actual JSON Content-Type
             const ct = response.headers.get('content-type') || '';
             if (!ct.includes('application/json')) {
                 return response.text().then(text => {
