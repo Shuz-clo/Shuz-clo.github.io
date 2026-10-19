@@ -2,10 +2,12 @@
 // ============================================================
 // manage_users.php — COMPLETE FIXED FILE
 //
-// FIX (Bug E): admin-count check for demote/delete now runs
-//              inside a transaction with SELECT … FOR UPDATE on
-//              admin rows, so two concurrent demotions of the
-//              last two admins cannot both succeed.
+// FIX (Bug E): admin-count check for demote/delete runs inside a
+//              transaction with SELECT … FOR UPDATE on admin rows.
+// FIX (Bug 6): every $conn->rollback() is guarded so strict-mode
+//              mysqli cannot double-throw after commit(). Also the
+//              outer catch now rolls back the transaction (it did
+//              not before).
 // FIX (Bug 2): repaired stray HTML in the hint paragraph.
 // ============================================================
 
@@ -103,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $conn->query("SELECT id FROM users WHERE role = 'admin' FOR UPDATE");
                     $adminTotal = admin_count($conn);
                     if ($target['role'] === 'admin' && $role !== 'admin' && $adminTotal <= 1) {
-                        $conn->rollback();
+                        try { $conn->rollback(); } catch (Throwable $ignored) {}
                         flash('error', 'You must keep at least one admin account.');
                     } else {
                         $stmt = $conn->prepare("UPDATE users SET role = ? WHERE id = ?");
@@ -117,8 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ['user_id' => $id, 'username' => $target['username'], 'role' => $role]);
                         flash('success', "'" . $target['username'] . "' is now $role. It applies at their next login.");
                     }
-                } catch (Exception $e) {
-                    $conn->rollback();
+                } catch (Throwable $e) {
+                    try { $conn->rollback(); } catch (Throwable $ignored) {}
                     throw $e;
                 }
             }
@@ -157,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $conn->query("SELECT id FROM users WHERE role = 'admin' FOR UPDATE");
                     $adminTotal = admin_count($conn);
                     if ($target['role'] === 'admin' && $adminTotal <= 1) {
-                        $conn->rollback();
+                        try { $conn->rollback(); } catch (Throwable $ignored) {}
                         flash('error', 'You must keep at least one admin account.');
                     } else {
                         revoke_user_tokens($conn, $id);
@@ -170,8 +172,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ['user_id' => $id, 'username' => $target['username']], null);
                         flash('success', "Account '" . $target['username'] . "' deleted.");
                     }
-                } catch (Exception $e) {
-                    $conn->rollback();
+                } catch (Throwable $e) {
+                    try { $conn->rollback(); } catch (Throwable $ignored) {}
                     throw $e;
                 }
             }
@@ -179,7 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             flash('error', 'Unknown action.');
         }
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
+        try { $conn->rollback(); } catch (Throwable $ignored) {}
         error_log('manage_users error: ' . $e->getMessage());
         flash('error', DEBUG ? $e->getMessage() : 'Something went wrong. Please try again.');
     }
