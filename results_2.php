@@ -1,19 +1,4 @@
 <?php
-// ============================================================
-// results_2.php — COMPLETE FIXED FILE
-//
-// FIX (Bug 5):  Tab rename now records {from, to} in a
-//               pendingRenames array that is sent to
-//               save_score.php, so candidates in the database
-//               are actually renamed (was: only UI renamed,
-//               candidates kept old office_name).
-// FIX (Bug 21): normalize_rater() now matches rater_list()
-//               regardless of space/hyphen/underscore variants
-//               ("END USER" / "ENDUSER" / "END-USER" all map to
-//               "END-USER"; same for VICE-CHAIR, etc.).
-// (Retains earlier fixes: Bug D, 13, 50.)
-// ============================================================
-
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
