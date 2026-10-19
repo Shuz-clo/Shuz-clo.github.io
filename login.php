@@ -1,15 +1,14 @@
 <?php
 // ============================================================
-// login.php — FIXED
+// login.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 6): remember_admin cookie used SameSite=Strict,
-//              which prevented it from being sent on top-level
-//              navigations from external sites. Changed to Lax.
-// FIX (Bug 7): the remember-me token was never rotated on use,
-//              so a leaked cookie stayed valid for 30 days.
-//              Now rotate on every successful auto-login.
-// FIX:         login_success / login_failure are recorded in the
-//              audit log (Audit.php's ENUM now supports them).
+// FIX (Bug 6): remember_admin cookie uses SameSite=Lax so it
+//              survives top-level external navigations.
+// FIX (Bug 7): remember-me token rotated on every auto-login.
+// FIX:         remember_admin cookie deletion uses the array
+//              setcookie() signature so browsers reliably clear
+//              it (matching the attributes it was set with).
+// FIX:         login_success / login_failure written to audit.
 // ============================================================
 
 require_once 'db.php';
@@ -21,7 +20,6 @@ require_once __DIR__ . '/Audit.php';
 ensure_auth_schema($conn);
 purge_expired_tokens($conn);
 
-// Already logged in? Redirect to landing page.
 if (is_logged_in()) {
     header("Location: " . landing_page_for(current_role()));
     exit;
@@ -30,15 +28,11 @@ if (is_logged_in()) {
 $error   = flash_get('error') ?? '';
 $success = flash_get('success');
 
-// ============================================================
-// FIX (Bug 6 + Bug 7): auto-login via remember-me cookie
-//   - SameSite=Lax so top-level navigations still send the cookie
-//   - rotate the token on use so a leak cannot be replayed
-// ============================================================
+// ---------- Auto-login via remember-me cookie ----------
 if (!empty($_COOKIE['remember_admin'])) {
     $user = verify_remember_token($conn, $_COOKIE['remember_admin']);
     if ($user) {
-        // Rotate: delete the used token, issue a fresh one
+        // Rotate: delete used token, issue a fresh one
         delete_remember_token($conn, $_COOKIE['remember_admin']);
         $newToken = issue_remember_token($conn, (int)$user['id'], 30);
         setcookie('remember_admin', $newToken, [
@@ -46,7 +40,7 @@ if (!empty($_COOKIE['remember_admin'])) {
             'path'     => '/',
             'secure'   => !empty($_SERVER['HTTPS']),
             'httponly' => true,
-            'samesite' => 'Lax',     // FIX (Bug 6)
+            'samesite' => 'Lax',
         ]);
 
         session_regenerate_id(true);
@@ -63,7 +57,13 @@ if (!empty($_COOKIE['remember_admin'])) {
         header("Location: " . landing_page_for($user['role']));
         exit;
     } else {
-        setcookie('remember_admin', '', time() - 3600, '/', '', !empty($_SERVER['HTTPS']), true);
+        setcookie('remember_admin', '', [
+            'expires'  => time() - 3600,
+            'path'     => '/',
+            'secure'   => !empty($_SERVER['HTTPS']),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
     }
 }
 
@@ -88,7 +88,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['last_activity'] = time();
             unset($_SESSION['csrf_token']);
 
-            // FIX (Bug 6): SameSite=Lax so the cookie survives external nav
             if (!empty($_POST['remember'])) {
                 $token = issue_remember_token($conn, (int)$user['id'], 30);
                 setcookie('remember_admin', $token, [
@@ -99,7 +98,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'samesite' => 'Lax',
                 ]);
             } else {
-                setcookie('remember_admin', '', time() - 3600, '/', '', !empty($_SERVER['HTTPS']), true);
+                setcookie('remember_admin', '', [
+                    'expires'  => time() - 3600,
+                    'path'     => '/',
+                    'secure'   => !empty($_SERVER['HTTPS']),
+                    'httponly' => true,
+                    'samesite' => 'Lax',
+                ]);
             }
 
             audit_log($conn, 0, 'login_success',
