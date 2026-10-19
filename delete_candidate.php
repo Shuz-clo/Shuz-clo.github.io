@@ -1,12 +1,4 @@
 <?php
-// ============================================================
-// delete_candidate.php — COMPLETE FIXED FILE
-//
-// FIX (Bug C): require_admin(true) — stale session gets a JSON
-//              401/403, not an HTML redirect that breaks
-//              res.json() on the client.
-// ============================================================
-
 ob_start();
 
 require_once 'db.php';
