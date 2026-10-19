@@ -1,15 +1,4 @@
 <?php
-// ============================================================
-// login.php — COMPLETE FIXED FILE
-//
-// FIX (Bug 6): remember_admin cookie uses SameSite=Lax so it
-//              survives top-level external navigations.
-// FIX (Bug 7): remember-me token rotated on every auto-login.
-// FIX:         remember_admin cookie deletion uses the array
-//              setcookie() signature so browsers reliably clear
-//              it (matching the attributes it was set with).
-// FIX:         login_success / login_failure written to audit.
-// ============================================================
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
