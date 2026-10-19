@@ -1,18 +1,13 @@
 <?php
 // ============================================================
-// submit_score.php — FIXED
+// submit_score.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 24): refresh_session_user() issues a Location: header
-//               and exit() if the account was deleted. On a JSON
-//               fetch that produced a 302 → HTML login page.
-//               Inlined the check here so JSON callers get JSON.
-// FIX (Bug 2):  office_name was copied verbatim into
-//               office_location (VARCHAR(100)) without
-//               truncation. Now truncated to 100 chars.
-// FIX (Bug 3):  $existing was reused for both the candidate row
-//               and the rater-order array. Renamed the second
-//               use to $existingRaters.
-// FIX:          audit_log() called after a successful commit.
+// FIX (Bug A): honeypot check uses $_POST[HONEYPOT_FIELD] so it
+//              matches the field name emitted by index.php.
+// FIX (Bug 24): inline session refresh respects JSON.
+// FIX (Bug 2): office_name truncated for office_location.
+// FIX (Bug 3): $existing renamed to $existingRaters.
+// FIX: audit_log() called after successful commit.
 // ============================================================
 
 require_once 'db.php';
@@ -41,9 +36,6 @@ if (!is_logged_in()) {
     respond(false, 'Please log in again.', 401, $wantsJson);
 }
 
-// ============================================================
-// FIX (Bug 24): inline session refresh that respects $wantsJson
-// ============================================================
 if (isset($conn) && $conn instanceof mysqli && function_exists('find_user_by_id')) {
     $freshUser = find_user_by_id($conn, (int)$_SESSION['user_id']);
     if ($freshUser === null) {
@@ -65,7 +57,7 @@ if (!verify_csrf($_POST['csrf_token'] ?? null)) {
     respond(false, 'Your session expired. Please refresh the page.', 403, $wantsJson);
 }
 
-if (!empty($_POST['website'])) {
+if (!empty($_POST[HONEYPOT_FIELD])) {
     respond(true, 'Saved.', 200, $wantsJson);
 }
 
@@ -88,7 +80,6 @@ $rater_name     = mb_substr(trim($_POST['rater_name'] ?? ''), 0, 255);
 if ($position_title === '') $position_title = 'LMO I';
 if ($interview_date === '') $interview_date = date('F d, Y');
 
-// FIX (Bug 2): office_location column is VARCHAR(100)
 $office_location = mb_substr($office_name, 0, 100);
 
 if ($candidate_name === '') {
@@ -170,7 +161,6 @@ $evidenceJson = count($evidence) > 0 ? json_encode($evidence, JSON_UNESCAPED_UNI
 
 $columns = ['candidate_name', 'position_title', 'office_location', 'office_name', 'interview_date', 'rater_name',
             'core_avg', 'org_avg', 'lead_avg', 'func_avg', 'evidence_json', 'psycho_ave', 'potential_ave'];
-// FIX (Bug 2): use $office_location (truncated) for the office_location column
 $values  = [$candidate_name, $position_title, $office_location, $office_name, $interview_date, $rater_name,
             $core_avg, $org_avg, $lead_avg, $func_avg, $evidenceJson, $psycho_score, $potential_score];
 $types   = 'ssssss' . 'dddd' . 's' . 'dd';
@@ -216,7 +206,6 @@ try {
     }
     $stmtScore->close();
 
-    // FIX (Bug 3): renamed to $existingRaters for clarity
     $existingRaters = position_rater_order($conn, $office_name, $position_title);
     $merged         = array_values(array_unique(array_merge($existingRaters, $selectedRaters)));
     record_rater_order($conn, $office_name, $position_title, $merged);
@@ -224,7 +213,6 @@ try {
     $conn->commit();
     $_SESSION['last_submit'] = time();
 
-    // FIX: audit after successful commit
     audit_log($conn, $candidateId, $isEdit ? 'edit' : 'submit',
         null,
         [
