@@ -1,15 +1,4 @@
 <?php
-// ============================================================
-// save_score.php — COMPLETE FIXED FILE
-//
-// FIX (Bug C): require_admin(true) — JSON-safe 401/403 for
-//              stale sessions.
-// FIX (Bug 2): office_name copied into office_location
-//              (VARCHAR(100)) truncated.
-// FIX:         audit entries collected during the loop and
-//              written via audit_log() after a successful commit.
-// ============================================================
-
 ob_start();
 
 require_once 'db.php';
