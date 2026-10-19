@@ -1,4 +1,15 @@
 <?php
+// ============================================================
+// login.php — COMPLETE FIXED FILE
+//
+// FIX (Bug 6): remember_admin cookie uses SameSite=Lax.
+// FIX (Bug 7): remember-me token rotated on every auto-login.
+// FIX (Bug 28): username is truncated to 100 chars BEFORE being
+//               stored in the audit log, preventing a malicious
+//               client from writing megabytes into score_audit.
+// FIX:          cookie deletion uses array setcookie() signature.
+// FIX:          login_success / login_failure written to audit.
+// ============================================================
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
@@ -21,7 +32,6 @@ $success = flash_get('success');
 if (!empty($_COOKIE['remember_admin'])) {
     $user = verify_remember_token($conn, $_COOKIE['remember_admin']);
     if ($user) {
-        // Rotate: delete used token, issue a fresh one
         delete_remember_token($conn, $_COOKIE['remember_admin']);
         $newToken = issue_remember_token($conn, (int)$user['id'], 30);
         setcookie('remember_admin', $newToken, [
@@ -64,7 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!verify_csrf($_POST['csrf_token'] ?? null)) {
         $error = 'Your session expired. Please try again.';
     } else {
-        $username = trim($_POST['username'] ?? '');
+        // FIX (Bug 28): cap BEFORE it reaches audit_log / DB lookups
+        $username = mb_substr(trim($_POST['username'] ?? ''), 0, 100);
         $password = $_POST['password'] ?? '';
         $user     = $username !== '' ? find_user_by_username($conn, $username) : null;
 
