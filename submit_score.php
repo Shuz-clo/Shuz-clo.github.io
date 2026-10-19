@@ -1,4 +1,15 @@
 <?php
+// ============================================================
+// submit_score.php — COMPLETE FIXED FILE
+//
+// FIX (Bug A): honeypot check uses $_POST[HONEYPOT_FIELD].
+// FIX (Bug 24): inline session refresh respects JSON.
+// FIX (Bug 2): office_name truncated for office_location.
+// FIX (Bug 3): $existing renamed to $existingRaters.
+// FIX (Bug 6): every $conn->rollback() is guarded so strict-mode
+//              mysqli cannot double-throw after commit().
+// FIX: audit_log() called after successful commit.
+// ============================================================
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
@@ -214,8 +225,8 @@ try {
     );
 
     respond(true, 'Saved.', 200, $wantsJson);
-} catch (Exception $e) {
-    $conn->rollback();
+} catch (Throwable $e) {
+    try { $conn->rollback(); } catch (Throwable $ignored) {}
     error_log('submit_score error: ' . $e->getMessage());
     respond(false, DEBUG ? $e->getMessage() : 'Could not save. Please try again.', 500, $wantsJson);
 }
