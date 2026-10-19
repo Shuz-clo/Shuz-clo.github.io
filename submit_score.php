@@ -1,14 +1,4 @@
 <?php
-// ============================================================
-// submit_score.php — COMPLETE FIXED FILE
-//
-// FIX (Bug A): honeypot check uses $_POST[HONEYPOT_FIELD] so it
-//              matches the field name emitted by index.php.
-// FIX (Bug 24): inline session refresh respects JSON.
-// FIX (Bug 2): office_name truncated for office_location.
-// FIX (Bug 3): $existing renamed to $existingRaters.
-// FIX: audit_log() called after successful commit.
-// ============================================================
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
