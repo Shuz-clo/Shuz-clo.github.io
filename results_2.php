@@ -2,16 +2,16 @@
 // ============================================================
 // results_2.php — COMPLETE FIXED FILE
 //
-// FIX (Bug D): normalize_rater() now returns the CANONICAL
-//              label from rater_list() when it recognises one,
-//              instead of rewriting whitespace to dashes (which
-//              made "CHIEF PERSONNEL SECTION" become
-//              "CHIEF-PERSONNEL-SECTION" and never match
-//              rater_list()). Unknown labels are kept (no data
-//              loss) with whitespace collapsed to one space.
-// FIX (Bug 13): legacy scores for unknown raters still show.
-// FIX (Bug 50): renameBranchTab() syncs DOM first, then moves
-//              data, then skips redundant re-sync.
+// FIX (Bug 5):  Tab rename now records {from, to} in a
+//               pendingRenames array that is sent to
+//               save_score.php, so candidates in the database
+//               are actually renamed (was: only UI renamed,
+//               candidates kept old office_name).
+// FIX (Bug 21): normalize_rater() now matches rater_list()
+//               regardless of space/hyphen/underscore variants
+//               ("END USER" / "ENDUSER" / "END-USER" all map to
+//               "END-USER"; same for VICE-CHAIR, etc.).
+// (Retains earlier fixes: Bug D, 13, 50.)
 // ============================================================
 
 require_once 'db.php';
@@ -161,23 +161,22 @@ try {
 }
 
 // ============================================================
-// FIX (Bug D): map known labels to their canonical casing from
-// rater_list(); keep unknown labels with whitespace collapsed
-// to a single space (not a dash). No data loss.
+// FIX (Bug D + Bug 21): canonicalise known labels regardless
+// of space/hyphen/underscore variants. Unknown labels are kept
+// (no data loss) with whitespace collapsed to a single space.
 // ============================================================
 function normalize_rater(string $label): ?string {
     $trimmed = trim($label);
     if ($trimmed === '') return null;
 
     $known = rater_list();
-    $upper = strtoupper($trimmed);
+    $upperCompact = preg_replace('/[\s\-_]+/', '', strtoupper($trimmed));
+
     foreach ($known as $r) {
-        if (strtoupper($r) === $upper) return $r;
+        if (preg_replace('/[\s\-_]+/', '', strtoupper($r)) === $upperCompact) return $r;
     }
 
-    $normalized = preg_replace('/\s+/', ' ', $upper);
-    if ($normalized === 'ENDUSER') $normalized = 'END-USER';
-    return $normalized;
+    return preg_replace('/\s+/', ' ', strtoupper($trimmed));
 }
 
 // ---------- Migrate legacy scores ----------
@@ -529,6 +528,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const MIN_SLOTS = 7;
         const CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;
         const hiddenTabs = new Set();
+        const pendingRenames = [];
         let skipNextSync = false;
         const addedRaters = {};
         const storedOrders = <?php echo json_encode($storedOrders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -1033,6 +1033,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         // ============================================================
         // FIX (Bug 50): sync DOM into groupedData BEFORE moving the
         // branch key, then skip the redundant re-sync in renderAll().
+        // FIX (Bug 5):  record the rename in pendingRenames so
+        //               save_score.php can UPDATE candidates rows.
         // ============================================================
         function renameBranchTab(el) {
             const container = el.closest('.table-container');
@@ -1050,6 +1052,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
 
             syncFromDom();
+            pendingRenames.push({ from: oldBranch, to: newBranch });
 
             groupedData[newBranch] = groupedData[oldBranch] || [];
             hiddenTabs.add(oldBranch);
@@ -1148,6 +1151,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
                     columns: columnsToSave,
                     tabs: tabsToSave,
                     hiddenTabs: Array.from(hiddenTabs),
+                    renames: pendingRenames,
                     headers: headerLabels,
                     positionsToDelete: window.__positionsToDelete
                 })
@@ -1167,12 +1171,17 @@ foreach ($groupedCandidates as $officeKey => $list) {
                         });
                     }
                     window.__positionsToDelete = [];
+                    pendingRenames.length = 0;
+
                     let msg = 'All interview rating sheets saved successfully!';
                     if (typeof data.savedColumns === 'number') {
                         msg += '\n' + data.savedColumns + ' rater column(s) stored.';
                     }
                     if (typeof data.deletedPositions === 'number' && data.deletedPositions > 0) {
                         msg += '\n' + data.deletedPositions + ' position table(s) permanently deleted.';
+                    }
+                    if (typeof data.renamedOffices === 'number' && data.renamedOffices > 0) {
+                        msg += '\n' + data.renamedOffices + ' office(s) renamed.';
                     }
                     alert(msg);
                 } else {
