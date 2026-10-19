@@ -1,13 +1,10 @@
 <?php
 // ============================================================
-// register.php — FIXED
+// register.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 8): the 5-second throttle read
-//              $_SESSION['last_register'] at the top of the
-//              validation chain and wrote it at the bottom.
-//              Two parallel submissions could both pass the
-//              check before either set the flag. Now we claim
-//              the slot immediately before the INSERT.
+// FIX (Bug B): honeypot form field and server-side check both
+//              use HONEYPOT_FIELD, matching index.php.
+// FIX (Bug 8): throttle slot claimed atomically before INSERT.
 // ============================================================
 
 require_once 'auth.php';
@@ -18,7 +15,6 @@ require_once __DIR__ . '/Audit.php';
 
 ensure_auth_schema($conn);
 
-// Already signed in? Send them where they belong.
 if (is_logged_in()) {
     header('Location: ' . landing_page_for((string)current_role()));
     exit;
@@ -43,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $old['username'] = $username;
     $old['role']     = in_array($postedRole, REG_ALLOWED_ROLES, true) ? $postedRole : 'rater';
 
-    if (!empty($_POST['website'])) {
+    if (!empty($_POST[HONEYPOT_FIELD])) {
         flash_set('success', 'Account created successfully! Please sign in.');
         header('Location: login.php');
         exit;
@@ -78,7 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $role = $postedRole;
 
-            // FIX (Bug 8): claim the throttle slot atomically before the INSERT
             $_SESSION['last_register'] = time();
 
             $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)");
@@ -192,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <form method="POST" action="register.php" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-            <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
+            <input type="text" name="<?php echo HONEYPOT_FIELD; ?>" tabindex="-1" autocomplete="off" aria-hidden="true"
                    style="position:absolute; left:-9999px; width:1px; height:1px;">
 
             <div class="field">
