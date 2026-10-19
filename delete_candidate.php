@@ -1,18 +1,18 @@
 <?php
 // ============================================================
-// delete_candidate.php — FIXED
+// delete_candidate.php — COMPLETE FIXED FILE
 //
-// FIX: Audit.php required, candidate details fetched BEFORE
-//      deletion, audit_log() called after a successful commit.
+// FIX (Bug C): require_admin(true) — stale session gets a JSON
+//              401/403, not an HTML redirect that breaks
+//              res.json() on the client.
 // ============================================================
 
-// Buffer everything so a stray PHP warning can never corrupt the JSON reply.
 ob_start();
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
-require_admin();
+require_admin(true);
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/Audit.php';
 
@@ -40,7 +40,6 @@ if ($id <= 0) {
 try {
     ensure_schema($conn);
 
-    // FIX: snapshot the candidate for the audit trail
     $stmtInfo = $conn->prepare("SELECT candidate_name, office_name, position_title FROM candidates WHERE id = ? LIMIT 1");
     $stmtInfo->bind_param('i', $id);
     $stmtInfo->execute();
@@ -66,7 +65,6 @@ try {
         json_out(['status' => 'error', 'message' => 'That applicant was not found in the database (it may already be deleted). Refresh the page.']);
     }
 
-    // FIX: audit after commit
     audit_log($conn, $id, 'delete', $candInfo ?: null, null);
 
     json_out(['status' => 'success']);
