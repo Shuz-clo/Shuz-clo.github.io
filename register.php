@@ -1,11 +1,4 @@
 <?php
-// ============================================================
-// register.php — COMPLETE FIXED FILE
-//
-// FIX (Bug B): honeypot form field and server-side check both
-//              use HONEYPOT_FIELD, matching index.php.
-// FIX (Bug 8): throttle slot claimed atomically before INSERT.
-// ============================================================
 
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
