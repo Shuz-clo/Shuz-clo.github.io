@@ -1,14 +1,4 @@
 <?php
-// ============================================================
-// auth.php — COMPLETE FIXED FILE
-//
-// FIX (Bug C): refresh_session_user(), require_login(),
-//              require_role() and require_admin() now accept an
-//              $apiMode flag. When true, they return a JSON 401/
-//              403 instead of issuing an HTML redirect, so JSON
-//              endpoints never receive a 302 -> HTML login page
-//              that breaks fetch().json() parsing.
-// ============================================================
 
 if (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
     $_SERVER['HTTPS'] = 'on';
