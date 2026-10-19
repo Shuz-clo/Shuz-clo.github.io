@@ -1,10 +1,24 @@
 <?php
+// ============================================================
+// auth.php — COMPLETE FIXED FILE
+//
+// FIX (Bug C): refresh_session_user(), require_login(),
+//              require_role() and require_admin() now accept an
+//              $apiMode flag. When true, they return a JSON 401/
+//              403 instead of issuing an HTML redirect, so JSON
+//              endpoints never receive a 302 -> HTML login page
+//              that breaks fetch().json() parsing.
+// ============================================================
+
 if (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
     $_SERVER['HTTPS'] = 'on';
 }
-// Hardened session start: HttpOnly + SameSite cookie, Secure when on HTTPS
+
+if (!defined('AUTH_IDLE_TIMEOUT')) {
+    define('AUTH_IDLE_TIMEOUT', 1800);
+}
+
 if (session_status() === PHP_SESSION_NONE) {
-// Hardened session start: HttpOnly + SameSite cookie, Secure when on HTTPS
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
@@ -13,11 +27,6 @@ if (session_status() === PHP_SESSION_NONE) {
         'samesite' => 'Lax',
     ]);
     session_start();
-}
-
-// Idle timeout: log out after 30 minutes without a request
-if (!defined('AUTH_IDLE_TIMEOUT')) {
-    define('AUTH_IDLE_TIMEOUT', 1800);
 }
 
 if (!empty($_SESSION['user_id'])) {
@@ -30,18 +39,12 @@ if (!empty($_SESSION['user_id'])) {
     }
 }
 
-/**
- * Set a session flash message
- */
 if (!function_exists('flash_set')) {
     function flash_set(string $key, string $message): void {
         $_SESSION['flash'][$key] = $message;
     }
 }
 
-/**
- * Retrieve and clear a session flash message
- */
 if (!function_exists('flash_get')) {
     function flash_get(string $key): ?string {
         if (isset($_SESSION['flash'][$key])) {
@@ -53,9 +56,6 @@ if (!function_exists('flash_get')) {
     }
 }
 
-/**
- * Map user roles to their respective landing pages
- */
 if (!function_exists('is_logged_in')) {
     function is_logged_in(): bool {
         return !empty($_SESSION['user_id']);
@@ -81,22 +81,25 @@ if (!function_exists('landing_page_for')) {
     }
 }
 
-/**
- * Re-read the logged-in user's name and role from the database on every request,
- * so a demoted or deleted account loses access immediately.
- * Needs db.php ($conn) and AuthSchema.php loaded BEFORE auth.php on the page.
- */
 if (!function_exists('refresh_session_user')) {
-    function refresh_session_user(): void {
+    function refresh_session_user(bool $apiMode = false): void {
         global $conn;
         if (!isset($conn) || !($conn instanceof mysqli) || !function_exists('find_user_by_id')) {
-            return; // page didn't load the database first; nothing to check against
+            return;
         }
 
         $user = find_user_by_id($conn, (int)$_SESSION['user_id']);
         if ($user === null) {
             $_SESSION = [];
             session_regenerate_id(true);
+
+            if ($apiMode) {
+                http_response_code(401);
+                header('Content-Type: application/json');
+                echo json_encode(['status' => 'error', 'message' => 'Your account is no longer available. Please log in again.']);
+                exit;
+            }
+
             flash_set('error', 'Your account is no longer available. Please log in again.');
             header('Location: ./login.php');
             exit;
@@ -107,35 +110,43 @@ if (!function_exists('refresh_session_user')) {
     }
 }
 
-/**
- * Require user to be logged in; redirect to login.php if not
- */
 if (!function_exists('require_login')) {
-    function require_login(): void {
+    function require_login(bool $apiMode = false): void {
         if (!is_logged_in()) {
+            if ($apiMode) {
+                http_response_code(401);
+                header('Content-Type: application/json');
+                echo json_encode(['status' => 'error', 'message' => 'Please log in to access this page.']);
+                exit;
+            }
             if (!isset($_SESSION['flash']['error'])) {
                 flash_set('error', 'Please log in to access this page.');
             }
             header('Location: ./login.php');
             exit;
         }
-        refresh_session_user();
+        refresh_session_user($apiMode);
     }
 }
 
-/**
- * Require a specific user role or array of roles
- */
 if (!function_exists('require_role')) {
-    function require_role(...$roles): void {
-        require_login();
-
-        // Flatten arguments if an array was passed as the first parameter
-        if (isset($roles[0]) && is_array($roles[0])) {
-            $roles = $roles[0];
+    function require_role(...$args): void {
+        $apiMode = false;
+        if (isset($args[0]) && is_bool($args[0])) {
+            $apiMode = array_shift($args);
         }
+        if (isset($args[0]) && is_array($args[0])) {
+            $args = $args[0];
+        }
+        require_login($apiMode);
 
-        if (!in_array(current_role(), $roles, true)) {
+        if (!in_array(current_role(), $args, true)) {
+            if ($apiMode) {
+                http_response_code(403);
+                header('Content-Type: application/json');
+                echo json_encode(['status' => 'error', 'message' => 'You do not have permission to access that page.']);
+                exit;
+            }
             flash_set('error', 'You do not have permission to access that page.');
             header('Location: ' . landing_page_for(current_role() ?? 'user'));
             exit;
@@ -143,27 +154,18 @@ if (!function_exists('require_role')) {
     }
 }
 
-/**
- * Require the logged-in user to be an admin
- */
 if (!function_exists('require_admin')) {
-    function require_admin(): void {
-        require_role('admin');
+    function require_admin(bool $apiMode = false): void {
+        require_role($apiMode, 'admin');
     }
 }
 
-/**
- * Get the current logged-in user's ID
- */
 if (!function_exists('current_user_id')) {
     function current_user_id(): ?int {
         return isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
     }
 }
 
-/**
- * Get current logged-in user details array or key
- */
 if (!function_exists('current_user')) {
     function current_user(?string $key = null) {
         if ($key !== null) {
