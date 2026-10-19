@@ -1,12 +1,4 @@
 <?php
-// ============================================================
-// logout.php — COMPLETE FIXED FILE
-//
-// FIX: session cookie and remember_admin cookie are now
-//      deleted with the array setcookie() signature (same
-//      attributes they were set with), so browsers reliably
-//      clear them including SameSite.
-// ============================================================
 
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
