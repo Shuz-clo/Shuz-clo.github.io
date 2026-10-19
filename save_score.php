@@ -1,4 +1,19 @@
 <?php
+// ============================================================
+// save_score.php — COMPLETE FIXED FILE
+//
+// FIX (Bug C): require_admin(true) — JSON-safe 401/403.
+// FIX (Bug 2): office_name truncated for office_location.
+// FIX (Bug 5): tab renames now UPDATE candidates.office_name
+//              and .office_location so renamed tabs persist.
+// FIX (Bug 6): every $conn->rollback() is guarded with a
+//              try/catch so strict-mode mysqli cannot double-throw
+//              after commit().
+// FIX (Bug 22): $deletedPositions counts positions, not candidate
+//               rows.
+// FIX: audit entries written after commit.
+// ============================================================
+
 ob_start();
 
 require_once 'db.php';
@@ -126,6 +141,7 @@ try {
         ];
     }
 
+    // ---------- FIX (Bug 22): count positions, not candidate rows ----------
     $deletedPositions = 0;
     if (isset($data['positionsToDelete']) && is_array($data['positionsToDelete'])) {
         $stmtDelScores = $conn->prepare("DELETE cs FROM candidate_scores cs
@@ -147,10 +163,11 @@ try {
 
             $stmtDelCands->bind_param('ss', $off, $pos);
             $stmtDelCands->execute();
-            $deletedPositions += $stmtDelCands->affected_rows;
 
             $stmtDelOrder->bind_param('ss', $off, $pos);
             $stmtDelOrder->execute();
+
+            $deletedPositions++;
 
             $auditEntries[] = [
                 'candidate_id' => 0,
@@ -163,6 +180,58 @@ try {
         $stmtDelOrder->close();
     }
 
+    // ---------- FIX (Bug 5): persist tab renames ----------
+    $renamedOffices = 0;
+    if (isset($data['renames']) && is_array($data['renames'])) {
+        $stmtRenameCand = $conn->prepare("UPDATE candidates SET office_name = ?, office_location = ?
+            WHERE UPPER(TRIM(office_name)) = UPPER(?)");
+
+        foreach ($data['renames'] as $rn) {
+            if (!is_array($rn)) continue;
+            $from = strtoupper(mb_substr(trim((string)($rn['from'] ?? '')), 0, 100));
+            $to   = strtoupper(mb_substr(trim((string)($rn['to']   ?? '')), 0, 255));
+            if ($from === '' || $to === '' || $from === $to) continue;
+
+            $toLoc = mb_substr($to, 0, 100);
+
+            $stmtRenameCand->bind_param('sss', $to, $toLoc, $from);
+            $stmtRenameCand->execute();
+            $stmtRenameCand->free_result();
+            $renamedOffices++;
+
+            // Move rater order rows (use INSERT ... ON DUPLICATE to avoid conflicts)
+            $stmtMoveOrder = $conn->prepare(
+                "INSERT INTO position_rater_order (office, position, rater, sort_order)
+                 SELECT ?, position, rater, sort_order
+                 FROM position_rater_order
+                 WHERE office = ?
+                 ON DUPLICATE KEY UPDATE sort_order = VALUES(sort_order)"
+            );
+            $stmtMoveOrder->bind_param('ss', $to, $from);
+            $stmtMoveOrder->execute();
+            $stmtMoveOrder->close();
+
+            $stmtDelOrder2 = $conn->prepare("DELETE FROM position_rater_order WHERE office = ?");
+            $stmtDelOrder2->bind_param('s', $from);
+            $stmtDelOrder2->execute();
+            $stmtDelOrder2->close();
+
+            // Un-hide in removed_tabs (renamed tabs should not be hidden)
+            $stmtUnhide = $conn->prepare("DELETE FROM removed_tabs WHERE office IN (?, ?)");
+            $stmtUnhide->bind_param('ss', $from, $to);
+            $stmtUnhide->execute();
+            $stmtUnhide->close();
+
+            $auditEntries[] = [
+                'candidate_id' => 0,
+                'action'       => 'edit',
+                'new'          => ['office_from' => $from, 'office_to' => $to, 'via' => 'rename_tab']
+            ];
+        }
+        $stmtRenameCand->close();
+    }
+
+    // ---------- Rater column merge ----------
     $savedColumns = 0;
     if (isset($data['columns']) && is_array($data['columns'])) {
         $mergedCols = [];
@@ -201,6 +270,7 @@ try {
         }
     }
 
+    // ---------- Tabs (un-hide) ----------
     $tabList = [];
     if (isset($data['tabs']) && is_array($data['tabs'])) {
         foreach (array_slice($data['tabs'], 0, 200) as $t) {
@@ -225,6 +295,7 @@ try {
         }
     }
 
+    // ---------- Hidden tabs ----------
     if (isset($data['hiddenTabs']) && is_array($data['hiddenTabs'])) {
         try {
             $stmtHide = $conn->prepare("INSERT INTO removed_tabs (office) VALUES (?)
@@ -246,6 +317,7 @@ try {
         record_rater_order($conn, $office, $position, $ratersInOrder);
     }
 
+    // ---------- Header labels ----------
     if (isset($data['headers']) && is_array($data['headers'])) {
         $h = $data['headers'];
         $get = function($key, $default = '') use ($h) {
@@ -311,10 +383,11 @@ try {
         'status'           => 'success',
         'savedIds'         => $savedIds,
         'savedColumns'     => $savedColumns,
-        'deletedPositions' => $deletedPositions
+        'deletedPositions' => $deletedPositions,
+        'renamedOffices'   => $renamedOffices
     ]);
-} catch (Exception $e) {
-    $conn->rollback();
+} catch (Throwable $e) {
+    try { $conn->rollback(); } catch (Throwable $ignored) {}
     error_log('save_score error: ' . $e->getMessage());
     json_out(['status' => 'error', 'message' => DEBUG ? $e->getMessage() : 'Could not save changes.'], 500);
 }
