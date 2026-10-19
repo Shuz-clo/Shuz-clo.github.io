@@ -2,17 +2,16 @@
 // ============================================================
 // results_2.php — COMPLETE FIXED FILE
 //
-// FIX (Bug 13): normalize_rater() dropped unknown rater labels,
-//               losing legacy scores on display. Now returns the
-//               normalized label so nothing is silently discarded.
-// FIX (Bug 50): renameBranchTab() was missing syncFromDom()
-//               before moving branch data — unsaved edits in the
-//               tab being renamed were lost. Now snapshots the
-//               DOM first and skips the redundant re-sync.
-// FIX:          Added <meta name="chrome" content="nofill"> and
-//               wrapped the sheet in a <form autocomplete="off">
-//               so Chrome's Password Manager stops flagging the
-//               Save action as a breached-password submission.
+// FIX (Bug D): normalize_rater() now returns the CANONICAL
+//              label from rater_list() when it recognises one,
+//              instead of rewriting whitespace to dashes (which
+//              made "CHIEF PERSONNEL SECTION" become
+//              "CHIEF-PERSONNEL-SECTION" and never match
+//              rater_list()). Unknown labels are kept (no data
+//              loss) with whitespace collapsed to one space.
+// FIX (Bug 13): legacy scores for unknown raters still show.
+// FIX (Bug 50): renameBranchTab() syncs DOM first, then moves
+//              data, then skips redundant re-sync.
 // ============================================================
 
 require_once 'db.php';
@@ -27,7 +26,7 @@ header('Pragma: no-cache');
 
 ensure_schema($conn);
 
-// ---------- Load stored rater orders (per office/position) ----------
+// ---------- Load stored rater orders ----------
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
@@ -35,7 +34,6 @@ try {
     error_log('results_2 rater order load error: ' . $e->getMessage());
 }
 
-// Canonicalize stored-order keys
 $canonicalStoredOrders = [];
 foreach ($storedOrders as $off => $positions) {
     foreach ($positions as $pos => $raters) {
@@ -64,7 +62,7 @@ if ($sr) {
     }
 }
 
-// ---------- Load candidates and group them by office ----------
+// ---------- Load candidates and group by office ----------
 $result = $conn->query("SELECT * FROM candidates ORDER BY office_name ASC, interview_date ASC, id ASC");
 
 $groupedCandidates = [];
@@ -98,7 +96,7 @@ if ($result && $result->num_rows > 0) {
     }
 }
 
-// ---------- Ensure the standard offices exist as tabs, in this order ----------
+// ---------- Ensure the standard offices exist as tabs ----------
 $defaultOffices = ['REGIONAL OFFICE', 'PENRO ILOILO', 'PENRO CAPIZ', 'PENRO AKLAN', 'PENRO ANTIQUE', 'PENRO GUIMARAS', 'PENRO NEGROS OCCIDENTAL'];
 
 $orderedOffices = [];
@@ -159,24 +157,30 @@ try {
         ];
     }
 } catch (Exception $e) {
-    // Non-fatal; keep defaults
+    // Non-fatal
 }
 
 // ============================================================
-// FIX (Bug 13): normalize_rater() used to return null for any
-// rater label not in rater_list(), silently discarding scores
-// for that rater on page load. Now we normalize the label but
-// keep it, so legacy/unknown raters still show their scores.
+// FIX (Bug D): map known labels to their canonical casing from
+// rater_list(); keep unknown labels with whitespace collapsed
+// to a single space (not a dash). No data loss.
 // ============================================================
 function normalize_rater(string $label): ?string {
-    $l = strtoupper(trim($label));
-    if ($l === '') return null;
-    $l = preg_replace('/[\s_]+/', '-', $l);
-    if ($l === 'ENDUSER') $l = 'END-USER';
-    return $l; // keep unknown labels — dropping them loses data
+    $trimmed = trim($label);
+    if ($trimmed === '') return null;
+
+    $known = rater_list();
+    $upper = strtoupper($trimmed);
+    foreach ($known as $r) {
+        if (strtoupper($r) === $upper) return $r;
+    }
+
+    $normalized = preg_replace('/\s+/', ' ', $upper);
+    if ($normalized === 'ENDUSER') $normalized = 'END-USER';
+    return $normalized;
 }
 
-// ---------- Migrate legacy scores into the per-rater structure ----------
+// ---------- Migrate legacy scores ----------
 $legacyPLabels = [$headerLabels['core'], $headerLabels['org'], $headerLabels['psychoExtra1'], $headerLabels['psychoExtra2'], $headerLabels['psychoExtra3'], $headerLabels['psychoExtra4']];
 $legacyTLabels = [$headerLabels['func'], $headerLabels['lead'], $headerLabels['potentialExtra1'], $headerLabels['potentialExtra2'], $headerLabels['potentialExtra3'], $headerLabels['potentialExtra4']];
 
@@ -1027,13 +1031,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         }
 
         // ============================================================
-        // FIX (Bug 50): renameBranchTab() was missing syncFromDom()
-        // before modifying groupedData. Unsaved edits in the tab
-        // being renamed were silently lost because renderAll() →
-        // syncFromDom() would try to write them into a branch key
-        // that had just been deleted from groupedData. Now we
-        // snapshot the DOM first, then move the data, then skip
-        // the redundant re-sync.
+        // FIX (Bug 50): sync DOM into groupedData BEFORE moving the
+        // branch key, then skip the redundant re-sync in renderAll().
         // ============================================================
         function renameBranchTab(el) {
             const container = el.closest('.table-container');
@@ -1050,7 +1049,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 return;
             }
 
-            // FIX (Bug 50): capture unsaved edits from the DOM first
             syncFromDom();
 
             groupedData[newBranch] = groupedData[oldBranch] || [];
@@ -1058,7 +1056,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             delete groupedData[oldBranch];
             if (activeTabOffice === oldBranch) activeTabOffice = newBranch;
 
-            // Already synced; skip the redundant re-sync in renderAll()
             skipNextSync = true;
             renderAll();
         }
