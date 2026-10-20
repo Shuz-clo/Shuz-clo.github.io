@@ -1,4 +1,8 @@
 <?php
+// ============================================================
+// results_2.php — FINAL
+// ============================================================
+
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
@@ -145,20 +149,13 @@ try {
     // Non-fatal
 }
 
-// ============================================================
-// FIX (Bug D + Bug 21): canonicalise known labels regardless
-// of space/hyphen/underscore variants. Unknown labels are kept
-// (no data loss) with whitespace collapsed to a single space.
-// ============================================================
 function normalize_rater(string $label): ?string {
     $trimmed = trim($label);
     if ($trimmed === '') return null;
 
-    $known = rater_list();
-    $upperCompact = preg_replace('/[\s\-_]+/', '', strtoupper($trimmed));
-
-    foreach ($known as $r) {
-        if (preg_replace('/[\s\-_]+/', '', strtoupper($r)) === $upperCompact) return $r;
+    if (function_exists('canonical_rater_name')) {
+        $canonical = canonical_rater_name($trimmed);
+        if ($canonical !== '') return $canonical;
     }
 
     return preg_replace('/\s+/', ' ', strtoupper($trimmed));
@@ -499,6 +496,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
     <div class="action-bar no-print">
         <button type="button" class="btn btn-primary" onclick="saveWholeTable(event)">💾 Save All Changes</button>
         <button type="button" class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+        <a href="sheets.php" class="btn">📄 Sheets</a>
         <a href="manage_users.php" class="btn">👥 Manage Users</a>
         <a href="logout.php" class="btn" style="background-color: #dc3545; color: white; border-color: #dc3545;">🚪 Logout</a>
     </div>
@@ -975,6 +973,12 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 : `Delete the "${branch}" tab?`;
             if (!confirm(msg)) return;
 
+            for (let i = pendingRenames.length - 1; i >= 0; i--) {
+                if (pendingRenames[i].to === branch || pendingRenames[i].from === branch) {
+                    pendingRenames.splice(i, 1);
+                }
+            }
+
             fetch('delete_tab.php', {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -1015,12 +1019,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
         }
 
-        // ============================================================
-        // FIX (Bug 50): sync DOM into groupedData BEFORE moving the
-        // branch key, then skip the redundant re-sync in renderAll().
-        // FIX (Bug 5):  record the rename in pendingRenames so
-        //               save_score.php can UPDATE candidates rows.
-        // ============================================================
         function renameBranchTab(el) {
             const container = el.closest('.table-container');
             const oldBranch = container.getAttribute('data-office');
@@ -1037,6 +1035,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
 
             syncFromDom();
+
             pendingRenames.push({ from: oldBranch, to: newBranch });
 
             groupedData[newBranch] = groupedData[oldBranch] || [];
