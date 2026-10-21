@@ -270,11 +270,13 @@ try {
         $isEdit = false;
     }
 
-    $stmtScore = $conn->prepare("INSERT INTO candidate_scores (candidate_id, rater, psycho, potential)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE psycho = VALUES(psycho), potential = VALUES(potential)");
+    $stmtScore = $conn->prepare("INSERT INTO candidate_scores (candidate_id, rater, psycho, potential, rated_by, rated_at)
+        VALUES (?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE psycho = VALUES(psycho), potential = VALUES(potential),
+            rated_by = VALUES(rated_by), rated_at = VALUES(rated_at)");
+    $ratedBy = (int)current_user_id();
     foreach ($selectedRaters as $rater) {
-        $stmtScore->bind_param('isdd', $candidateId, $rater, $psycho_score, $potential_score);
+        $stmtScore->bind_param('isddi', $candidateId, $rater, $psycho_score, $potential_score, $ratedBy);
         $stmtScore->execute();
     }
     $stmtScore->close();

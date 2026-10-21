@@ -1,8 +1,4 @@
 <?php
-// ============================================================
-// results_2.php — FINAL
-// ============================================================
-
 require_once 'db.php';
 require_once 'AuthSchema.php';
 require_once 'auth.php';
@@ -71,6 +67,8 @@ if ($result && $result->num_rows > 0) {
         foreach (['lead_avg', 'func_avg', 'potential_extra1', 'potential_extra2', 'potential_extra3', 'potential_extra4'] as $col) {
             $legacyT[] = isset($row[$col]) && $row[$col] !== null ? (float)$row[$col] : null;
         }
+        $customCompetencies = json_decode((string)($row['custom_competencies_json'] ?? '[]'), true);
+        if (!is_array($customCompetencies)) $customCompetencies = [];
 
         $groupedCandidates[$office][] = [
             'id'       => $id,
@@ -80,6 +78,7 @@ if ($result && $result->num_rows > 0) {
             'date'     => !empty($row['interview_date']) ? $row['interview_date'] : date('F d, Y'),
             'remarks'  => $row['remarks'] ?? '',
             'scores'   => isset($scoreMap[$id]) ? $scoreMap[$id] : [],
+            'customCompetencies' => $customCompetencies,
             '_legacy'  => ['p' => $legacyP, 't' => $legacyT],
         ];
     }
@@ -149,13 +148,20 @@ try {
     // Non-fatal
 }
 
+// ============================================================
+// FIX (Bug D + Bug 21): canonicalise known labels regardless
+// of space/hyphen/underscore variants. Unknown labels are kept
+// (no data loss) with whitespace collapsed to a single space.
+// ============================================================
 function normalize_rater(string $label): ?string {
     $trimmed = trim($label);
     if ($trimmed === '') return null;
 
-    if (function_exists('canonical_rater_name')) {
-        $canonical = canonical_rater_name($trimmed);
-        if ($canonical !== '') return $canonical;
+    $known = rater_list();
+    $upperCompact = preg_replace('/[\s\-_]+/', '', strtoupper($trimmed));
+
+    foreach ($known as $r) {
+        if (preg_replace('/[\s\-_]+/', '', strtoupper($r)) === $upperCompact) return $r;
     }
 
     return preg_replace('/\s+/', ' ', strtoupper($trimmed));
@@ -393,6 +399,9 @@ foreach ($groupedCandidates as $officeKey => $list) {
 
         .text-left { text-align: left !important; padding-left: 8px !important; }
         .remarks-cell { min-width: 140px; text-align: left; }
+        .custom-details-cell { min-width: 190px; text-align: left; }
+        .custom-details-cell details { text-align: left; }
+        .custom-details-cell ul { margin: 4px 0; padding-left: 18px; }
 
         th[contenteditable="true"], td[contenteditable="true"] { outline: none; cursor: cell; }
         th[contenteditable="true"]:focus, td[contenteditable="true"]:focus {
@@ -496,7 +505,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
     <div class="action-bar no-print">
         <button type="button" class="btn btn-primary" onclick="saveWholeTable(event)">💾 Save All Changes</button>
         <button type="button" class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
-        <a href="sheets.php" class="btn">📄 Sheets</a>
+        <a href="sheets.php" class="btn">My Sheets</a>
         <a href="manage_users.php" class="btn">👥 Manage Users</a>
         <a href="logout.php" class="btn" style="background-color: #dc3545; color: white; border-color: #dc3545;">🚪 Logout</a>
     </div>
@@ -536,6 +545,24 @@ foreach ($groupedCandidates as $officeKey => $list) {
             return Number(val).toFixed(2);
         }
 
+        function customCompetenciesHtml(sections) {
+            if (!Array.isArray(sections) || sections.length === 0) return '';
+            const sectionHtml = sections.map(section => {
+                const rows = Array.isArray(section.rows) ? section.rows : [];
+                const rowHtml = rows.map(row => {
+                    const rating = row.rating === null || row.rating === '' || row.rating === undefined
+                        ? 'Not rated'
+                        : formatVal(row.rating);
+                    const evidence = row.evidence ? ` — ${escapeHtml(row.evidence)}` : '';
+                    return `<li>${escapeHtml(row.title || 'Untitled competency')}: ${rating}${evidence}</li>`;
+                }).join('');
+                if (!rowHtml) return '';
+                return `<li><strong>${escapeHtml(section.label || 'Untitled section')}</strong><ul>${rowHtml}</ul></li>`;
+            }).join('');
+            if (!sectionHtml) return '';
+            return `<details><summary>View custom ratings</summary><ul>${sectionHtml}</ul></details>`;
+        }
+
         function updateHeaderLabel(el, key) {
             headerLabels[key] = el.innerText.replace(/[\r\n\t]/g, '').trim();
             renderAll();
@@ -561,6 +588,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
             const id = cand ? cand.id : '';
             const name = cand ? escapeHtml(cand.name) : '';
             const remarks = cand ? escapeHtml(cand.remarks) : '';
+            const customDetails = cand ? customCompetenciesHtml(cand.customCompetencies) : '';
 
             let pCells = '', tCells = '';
             const pVals = [], tVals = [];
@@ -591,6 +619,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
                     <td class="col-green-ave psycho-ave">${psychoAve}</td>
                     ${tCells}
                     <td class="col-yellow-ave potential-ave">${potentialAve}</td>
+                    <td class="custom-details-cell">${customDetails}</td>
                     <td class="text-left remarks-cell" contenteditable="true" data-field="remarks">${remarks}</td>
                 </tr>
             `;
@@ -607,7 +636,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 }
                 return h;
             };
-            const totalCols = 2 + (slots + 1) * 2 + 1;
+            const totalCols = 2 + (slots + 1) * 2 + 2;
 
             return `
                 <tr class="meta-row">
@@ -623,6 +652,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
                     <th style="width: 230px;" contenteditable="true" onblur="updateHeaderLabel(this,'name')">${escapeHtml(headerLabels.name)}</th>
                     <th colspan="${slots + 1}" class="header-psycho" contenteditable="true" onblur="updateHeaderLabel(this,'psychoGroup')">${escapeHtml(headerLabels.psychoGroup)}</th>
                     <th colspan="${slots + 1}" class="header-potential" contenteditable="true" onblur="updateHeaderLabel(this,'potentialGroup')">${escapeHtml(headerLabels.potentialGroup)}</th>
+                    <th rowspan="2" style="width: 190px;">CUSTOM RATINGS</th>
                     <th rowspan="2" style="width: 160px;" contenteditable="true" onblur="updateHeaderLabel(this,'remarks')">${escapeHtml(headerLabels.remarks)}</th>
                 </tr>
                 <tr class="sub-header">
@@ -973,12 +1003,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
                 : `Delete the "${branch}" tab?`;
             if (!confirm(msg)) return;
 
-            for (let i = pendingRenames.length - 1; i >= 0; i--) {
-                if (pendingRenames[i].to === branch || pendingRenames[i].from === branch) {
-                    pendingRenames.splice(i, 1);
-                }
-            }
-
             fetch('delete_tab.php', {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -1019,6 +1043,12 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
         }
 
+        // ============================================================
+        // FIX (Bug 50): sync DOM into groupedData BEFORE moving the
+        // branch key, then skip the redundant re-sync in renderAll().
+        // FIX (Bug 5):  record the rename in pendingRenames so
+        //               save_score.php can UPDATE candidates rows.
+        // ============================================================
         function renameBranchTab(el) {
             const container = el.closest('.table-container');
             const oldBranch = container.getAttribute('data-office');
@@ -1035,7 +1065,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
             }
 
             syncFromDom();
-
             pendingRenames.push({ from: oldBranch, to: newBranch });
 
             groupedData[newBranch] = groupedData[oldBranch] || [];

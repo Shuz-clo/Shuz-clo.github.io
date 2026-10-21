@@ -15,9 +15,12 @@ require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_once __DIR__ . '/Audit.php';
+require_once __DIR__ . '/AccessGroups.php';
+require_once __DIR__ . '/Raters.php';
 
-require_role('admin');
 ensure_auth_schema($conn);
+ensure_schema($conn);
+require_role('admin');
 
 const MANAGE_ROLES = ['admin', 'rater', 'user'];
 const MIN_PASSWORD_LENGTH = 8;
@@ -55,6 +58,13 @@ function password_problem(string $pw): ?string {
     return null;
 }
 
+function submitted_access_field(): string {
+    $choice = trim((string)($_POST['field_name'] ?? ''));
+    if ($choice !== 'Other') return $choice;
+    $other = trim((string)($_POST['field_other'] ?? ''));
+    return $other !== '' ? $other : 'Other';
+}
+
 $myId = current_user_id();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -66,26 +76,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     try {
-        if ($action === 'create') {
+        if ($action === 'link_candidate') {
+            $candidateId = (int)($_POST['candidate_id'] ?? 0);
+            $userId = (int)($_POST['user_id'] ?? 0);
+            if ($candidateId < 1 || $userId < 1) {
+                flash('error', 'Choose a candidate record and a Standard User account.');
+            } else {
+                $stmt = $conn->prepare("SELECT id, username FROM users WHERE id = ? AND role = 'user' LIMIT 1");
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                $targetUser = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if (!$targetUser) {
+                    flash('error', 'The selected account is not a Standard User.');
+                } else {
+                    $conn->begin_transaction();
+                    try {
+                        $stmt = $conn->prepare('SELECT user_id FROM candidates WHERE id = ? LIMIT 1 FOR UPDATE');
+                        $stmt->bind_param('i', $candidateId);
+                        $stmt->execute();
+                        $candidate = $stmt->get_result()->fetch_assoc();
+                        $stmt->close();
+                        if (!$candidate) {
+                            $conn->rollback();
+                            flash('error', 'Candidate record not found.');
+                        } elseif ($candidate['user_id'] !== null && (int)$candidate['user_id'] !== $userId) {
+                            $conn->rollback();
+                            flash('error', 'This candidate is already linked to another account. Unlink it first.');
+                        } else {
+                            $stmt = $conn->prepare('UPDATE candidates SET user_id = ? WHERE id = ?');
+                            $stmt->bind_param('ii', $userId, $candidateId);
+                            $stmt->execute();
+                            $stmt->close();
+                            $conn->commit();
+                            flash('success', 'Candidate record linked to ' . $targetUser['username'] . '.');
+                        }
+                    } catch (Throwable $e) {
+                        try { $conn->rollback(); } catch (Throwable $ignored) {}
+                        throw $e;
+                    }
+                }
+            }
+
+        } elseif ($action === 'unlink_candidate') {
+            $candidateId = (int)($_POST['candidate_id'] ?? 0);
+            if ($candidateId < 1) {
+                flash('error', 'Invalid candidate record.');
+            } else {
+                $stmt = $conn->prepare('UPDATE candidates SET user_id = NULL WHERE id = ?');
+                $stmt->bind_param('i', $candidateId);
+                $stmt->execute();
+                $changed = $stmt->affected_rows;
+                $stmt->close();
+                flash($changed > 0 ? 'success' : 'error', $changed > 0 ? 'Candidate record unlinked.' : 'Candidate link not found.');
+            }
+
+        } elseif ($action === 'create') {
             $username = trim($_POST['username'] ?? '');
             $password = $_POST['password'] ?? '';
             $role     = $_POST['role'] ?? '';
+            $region = (string)($_POST['region'] ?? '');
+            $fieldName = submitted_access_field();
+            $salaryGradeValue = (string)($_POST['salary_grade'] ?? '');
 
             if (!preg_match('/^[\p{L}0-9 .\-]{3,100}$/u', $username)) {
                 flash('error', 'Username must be 3-100 characters and can only contain letters (including ñ), numbers, spaces, dots, and hyphens.');
             } elseif (!in_array($role, MANAGE_ROLES, true)) {
                 flash('error', 'Please choose a valid role.');
+            } elseif (!array_key_exists($region, ACCESS_REGIONS)
+                || !access_field_is_valid($fieldName)
+                || !access_salary_grade_is_valid($salaryGradeValue)) {
+                flash('error', 'Please choose a valid region, field, and salary grade.');
             } elseif (($problem = password_problem($password)) !== null) {
                 flash('error', $problem);
             } elseif (find_user_by_username($conn, $username) !== null) {
                 flash('error', "The username '$username' is already taken.");
             } else {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)");
-                $stmt->bind_param('sss', $username, $hash, $role);
+                $salaryGrade = (int)$salaryGradeValue;
+                $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role, region, field_name, salary_grade) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param('sssssi', $username, $hash, $role, $region, $fieldName, $salaryGrade);
                 $stmt->execute();
                 $stmt->close();
                 flash('success', "Account '$username' created as $role.");
+            }
+
+        } elseif ($action === 'update_access_profile') {
+            $id = (int)($_POST['id'] ?? 0);
+            $region = (string)($_POST['region'] ?? '');
+            $fieldName = submitted_access_field();
+            $salaryGradeValue = (string)($_POST['salary_grade'] ?? '');
+            $target = $id > 0 ? find_user_by_id($conn, $id) : null;
+
+            if (!$target) {
+                flash('error', 'User not found.');
+            } elseif (!array_key_exists($region, ACCESS_REGIONS)
+                || !access_field_is_valid($fieldName)
+                || !access_salary_grade_is_valid($salaryGradeValue)) {
+                flash('error', 'Please choose a valid region, field, and salary grade.');
+            } else {
+                $salaryGrade = (int)$salaryGradeValue;
+                $stmt = $conn->prepare("UPDATE users SET region = ?, field_name = ?, salary_grade = ? WHERE id = ?");
+                $stmt->bind_param('ssii', $region, $fieldName, $salaryGrade, $id);
+                $stmt->execute();
+                $stmt->close();
+                flash('success', "Access profile updated for '" . $target['username'] . "'.");
             }
 
         } elseif ($action === 'change_role') {
@@ -163,6 +258,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         flash('error', 'You must keep at least one admin account.');
                     } else {
                         revoke_user_tokens($conn, $id);
+                        $stmt = $conn->prepare('UPDATE candidates SET user_id = NULL WHERE user_id = ?');
+                        $stmt->bind_param('i', $id);
+                        $stmt->execute();
+                        $stmt->close();
                         $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
                         $stmt->bind_param('i', $id);
                         $stmt->execute();
@@ -194,9 +293,15 @@ $flash = null;
 if (($m = flash_get('success')) !== null)   $flash = ['type' => 'success', 'msg' => $m];
 elseif (($m = flash_get('error')) !== null) $flash = ['type' => 'error',   'msg' => $m];
 $users = [];
-$res = $conn->query("SELECT id, username, role, created_at FROM users ORDER BY FIELD(role,'admin','rater','user'), username");
+$res = $conn->query("SELECT id, username, role, region, field_name, salary_grade, created_at FROM users ORDER BY FIELD(role,'admin','rater','user'), username");
 while ($row = $res->fetch_assoc()) {
     $users[] = $row;
+}
+$candidateRecords = [];
+$res = $conn->query("SELECT c.id, c.candidate_name, c.position_title, c.user_id, u.username
+    FROM candidates c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.id DESC");
+while ($row = $res->fetch_assoc()) {
+    $candidateRecords[] = $row;
 }
 $csrf = csrf_token();
 ?>
@@ -316,6 +421,41 @@ $csrf = csrf_token();
                     <option value="admin">Admin</option>
                 </select>
             </div>
+            <div class="f">
+                <label for="new_region">Region</label>
+                <select id="new_region" name="region" required>
+                    <option value="">-- Select region --</option>
+                    <?php foreach (ACCESS_REGIONS as $value => $label): ?>
+                        <option value="<?php echo h($value); ?>"><?php echo h($label); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="f">
+                <label for="new_field">Field</label>
+                <select id="new_field" name="field_name" required>
+                    <option value="">-- Select field --</option>
+                    <?php foreach (ACCESS_FIELDS as $value): ?>
+                        <option value="<?php echo h($value); ?>"><?php echo h($value); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input type="text" name="field_other" maxlength="100" placeholder="Enter field name" aria-label="Other field name" hidden>
+            </div>
+            <div class="f">
+                <label for="new_salary_grade">Salary grade</label>
+                <select id="new_salary_grade" name="salary_grade" required>
+                    <option value="">-- Select salary grade --</option>
+                    <optgroup label="Basic (0-17)">
+                        <?php for ($grade = 0; $grade <= 17; $grade++): ?>
+                            <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
+                        <?php endfor; ?>
+                    </optgroup>
+                    <optgroup label="Advanced (18-25)">
+                        <?php for ($grade = 18; $grade <= 25; $grade++): ?>
+                            <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
+                        <?php endfor; ?>
+                    </optgroup>
+                </select>
+            </div>
             <button type="submit">Create account</button>
         </form>
 
@@ -326,6 +466,63 @@ $csrf = csrf_token();
     </div>
 
     <div class="card">
+        <h2>Link candidate records to Standard User accounts</h2>
+        <p class="hint">Standard Users can only see candidate records explicitly linked to their account. Existing records are not matched automatically by name.</p>
+        <form method="POST" action="manage_users.php" class="add-form" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
+            <input type="hidden" name="action" value="link_candidate">
+            <div class="f">
+                <label for="candidate_link_user">Standard User account</label>
+                <select id="candidate_link_user" name="user_id" required>
+                    <option value="">-- Select account --</option>
+                    <?php foreach ($users as $user): if ($user['role'] !== 'user') continue; ?>
+                        <option value="<?php echo (int)$user['id']; ?>"><?php echo h($user['username']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="f">
+                <label for="candidate_link_record">Candidate record</label>
+                <select id="candidate_link_record" name="candidate_id" required>
+                    <option value="">-- Select candidate --</option>
+                    <?php foreach ($candidateRecords as $candidate): ?>
+                        <?php
+                        $candidateLabel = '#' . $candidate['id'] . ' · ' . ($candidate['candidate_name'] ?: 'Unnamed candidate')
+                            . ' · ' . ($candidate['position_title'] ?: 'No position');
+                        if (!empty($candidate['username'])) $candidateLabel .= ' · Linked to ' . $candidate['username'];
+                        ?>
+                        <option value="<?php echo (int)$candidate['id']; ?>"><?php echo h($candidateLabel); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button type="submit">Link record</button>
+        </form>
+        <?php if (!$candidateRecords): ?>
+            <p class="hint">No candidate records are available to link yet.</p>
+        <?php endif; ?>
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Candidate record</th><th>Linked account</th><th class="no-print"></th></tr></thead>
+                <tbody>
+                <?php foreach ($candidateRecords as $candidate): if ($candidate['user_id'] === null) continue; ?>
+                    <tr>
+                        <td><?php echo h(($candidate['candidate_name'] ?: 'Unnamed candidate') . ' · ' . ($candidate['position_title'] ?: 'No position')); ?></td>
+                        <td><?php echo h($candidate['username'] ?? 'Deleted account'); ?></td>
+                        <td class="no-print">
+                            <form method="POST" action="manage_users.php">
+                                <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
+                                <input type="hidden" name="action" value="unlink_candidate">
+                                <input type="hidden" name="candidate_id" value="<?php echo (int)$candidate['id']; ?>">
+                                <button type="submit" class="small danger">Unlink</button>
+                            </form>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>Accounts (<?php echo count($users); ?>)</h2>
         <div class="table-scroll">
             <table>
@@ -333,6 +530,7 @@ $csrf = csrf_token();
                     <tr>
                         <th>Username</th>
                         <th>Role</th>
+                        <th>Access profile</th>
                         <th>Reset password</th>
                         <th>Created</th>
                         <th class="no-print"></th>
@@ -365,6 +563,35 @@ $csrf = csrf_token();
                             <?php endif; ?>
                         </td>
                         <td>
+                            <form method="POST" action="manage_users.php" class="inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
+                                <input type="hidden" name="action" value="update_access_profile">
+                                <input type="hidden" name="id" value="<?php echo (int)$u['id']; ?>">
+                                <select name="region" required aria-label="Region for <?php echo h($u['username']); ?>">
+                                    <option value="">-- Region --</option>
+                                    <?php foreach (ACCESS_REGIONS as $value => $label): ?>
+                                        <option value="<?php echo h($value); ?>" <?php echo $u['region'] === $value ? 'selected' : ''; ?>><?php echo h($label); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <select name="field_name" required aria-label="Field for <?php echo h($u['username']); ?>">
+                                    <option value="">-- Field --</option>
+                                    <?php foreach (ACCESS_FIELDS as $value): ?>
+                                        <option value="<?php echo h($value); ?>" <?php echo ($u['field_name'] === $value || ($value === 'Other' && !in_array($u['field_name'], ACCESS_FIELDS, true))) ? 'selected' : ''; ?>><?php echo h($value); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <input type="text" name="field_other" maxlength="100" placeholder="Other field" aria-label="Other field for <?php echo h($u['username']); ?>"
+                                       value="<?php echo !in_array($u['field_name'], ACCESS_FIELDS, true) ? h($u['field_name']) : ''; ?>"
+                                       <?php echo ($u['field_name'] === 'Other' || !in_array($u['field_name'], ACCESS_FIELDS, true)) ? '' : 'hidden'; ?>>
+                                <select name="salary_grade" required aria-label="Salary grade for <?php echo h($u['username']); ?>">
+                                    <option value="">-- Grade --</option>
+                                    <?php for ($grade = 0; $grade <= 25; $grade++): ?>
+                                        <option value="<?php echo $grade; ?>" <?php echo (string)$u['salary_grade'] === (string)$grade ? 'selected' : ''; ?>><?php echo $grade; ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                                <button type="submit" class="small">Save</button>
+                            </form>
+                        </td>
+                        <td>
                             <form method="POST" action="manage_users.php" class="inline" autocomplete="off">
                                 <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
                                 <input type="hidden" name="action" value="reset_password">
@@ -390,12 +617,23 @@ $csrf = csrf_token();
                     </tr>
                 <?php endforeach; ?>
                 <?php if (empty($users)): ?>
-                    <tr><td colspan="5" class="muted">No accounts yet.</td></tr>
+                    <tr><td colspan="6" class="muted">No accounts yet.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+<script>
+    document.querySelectorAll('form').forEach(form => {
+        const fieldSelect = form.querySelector('select[name="field_name"]');
+        const otherFieldInput = form.querySelector('input[name="field_other"]');
+        if (!fieldSelect || !otherFieldInput) return;
+        fieldSelect.addEventListener('change', () => {
+            otherFieldInput.hidden = fieldSelect.value !== 'Other';
+            if (fieldSelect.value !== 'Other') otherFieldInput.value = '';
+        });
+    });
+</script>
 </body>
 </html>

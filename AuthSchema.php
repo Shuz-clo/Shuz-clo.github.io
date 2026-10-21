@@ -11,6 +11,9 @@ function auth_ensure_column(mysqli $conn, string $table, string $column, string 
 
 function ensure_auth_schema(mysqli $conn): void {
     $conn->query("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(100) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','rater','user') NOT NULL DEFAULT 'user', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
+    auth_ensure_column($conn, 'users', 'region', 'VARCHAR(100) NULL DEFAULT NULL');
+    auth_ensure_column($conn, 'users', 'field_name', 'VARCHAR(100) NULL DEFAULT NULL');
+    auth_ensure_column($conn, 'users', 'salary_grade', 'TINYINT UNSIGNED NULL DEFAULT NULL');
     $conn->query("CREATE TABLE IF NOT EXISTS remember_tokens (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
     $conn->query("CREATE TABLE IF NOT EXISTS login_attempts (ip VARCHAR(45) PRIMARY KEY, attempts INT NOT NULL DEFAULT 0, locked_until DATETIME NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
 }
@@ -23,6 +26,13 @@ function find_user_by_username(mysqli $conn, string $username): ?array {
 function find_user_by_id(mysqli $conn, int $id): ?array {
     $stmt = $conn->prepare("SELECT id, username, role FROM users WHERE id = ? LIMIT 1");
     $stmt->bind_param('i', $id); $stmt->execute(); $row = $stmt->get_result()->fetch_assoc(); $stmt->close(); return $row ?: null;
+}
+
+function find_user_access_profile(mysqli $conn, int $id): ?array {
+    $stmt = $conn->prepare("SELECT id, username, role, region, field_name, salary_grade FROM users WHERE id = ? LIMIT 1");
+    $stmt->bind_param('i', $id); $stmt->execute(); $row = $stmt->get_result()->fetch_assoc(); $stmt->close();
+    if ($row) $row['salary_grade'] = $row['salary_grade'] === null ? null : (int)$row['salary_grade'];
+    return $row ?: null;
 }
 
 function issue_remember_token(mysqli $conn, int $userId, int $days = 30): string {

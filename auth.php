@@ -64,7 +64,9 @@ if (!function_exists('landing_page_for')) {
             case 'admin':
                 return './results_2.php';
             case 'rater':
+                return './sheet_picker.php';
             case 'user':
+                return './my_profile.php';
             default:
                 return './index.php';
         }

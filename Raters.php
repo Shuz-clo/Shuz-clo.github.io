@@ -36,7 +36,9 @@ function ensure_schema(mysqli $conn): void {
     $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
       `id` int(11) NOT NULL AUTO_INCREMENT, `candidate_name` varchar(255) DEFAULT NULL, `position_title` varchar(255) DEFAULT NULL,
       `office_location` varchar(100) DEFAULT NULL, `office_name` varchar(255) DEFAULT '', `interview_date` varchar(255) DEFAULT NULL,
-      `rater_name` varchar(255) DEFAULT NULL, `evidence_json` text DEFAULT NULL,
+      `salary_grade` tinyint(3) unsigned DEFAULT NULL,
+      `user_id` int(11) DEFAULT NULL,
+      `rater_name` varchar(255) DEFAULT NULL, `evidence_json` text DEFAULT NULL, `custom_competencies_json` longtext DEFAULT NULL,
       `cc1` decimal(4,2) DEFAULT NULL, `cc2` decimal(4,2) DEFAULT NULL, `cc3` decimal(4,2) DEFAULT NULL, `cc4` decimal(4,2) DEFAULT NULL, `cc5` decimal(4,2) DEFAULT NULL,
       `oc1` decimal(4,2) DEFAULT NULL, `oc2` decimal(4,2) DEFAULT NULL, `oc3` decimal(4,2) DEFAULT NULL, `oc4` decimal(4,2) DEFAULT NULL, `oc5` decimal(4,2) DEFAULT NULL,
       `lc1` decimal(4,2) DEFAULT NULL, `lc2` decimal(4,2) DEFAULT NULL, `lc3` decimal(4,2) DEFAULT NULL, `lc4` decimal(4,2) DEFAULT NULL, `lc5` decimal(4,2) DEFAULT NULL,
@@ -47,10 +49,15 @@ function ensure_schema(mysqli $conn): void {
       `potential_extra1` decimal(4,2) DEFAULT NULL, `potential_extra2` decimal(4,2) DEFAULT NULL, `potential_extra3` decimal(4,2) DEFAULT NULL, `potential_extra4` decimal(4,2) DEFAULT NULL,
       `psycho_ave` decimal(4,2) DEFAULT NULL, `potential_ave` decimal(4,2) DEFAULT NULL, `remarks` text DEFAULT NULL, PRIMARY KEY (`id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $conn->query("CREATE TABLE IF NOT EXISTS candidate_scores (candidate_id INT NOT NULL, rater VARCHAR(30) NOT NULL, psycho DECIMAL(5,2) NULL, potential DECIMAL(5,2) NULL, PRIMARY KEY (candidate_id, rater)) DEFAULT CHARSET=utf8mb4");
+    $conn->query("CREATE TABLE IF NOT EXISTS candidate_scores (candidate_id INT NOT NULL, rater VARCHAR(30) NOT NULL, psycho DECIMAL(5,2) NULL, potential DECIMAL(5,2) NULL, rated_by INT NULL, rated_at DATETIME NULL, PRIMARY KEY (candidate_id, rater)) DEFAULT CHARSET=utf8mb4");
     ensure_column($conn, 'candidates', 'remarks', 'TEXT NULL');
+    ensure_column($conn, 'candidates', 'custom_competencies_json', 'LONGTEXT NULL');
     ensure_column($conn, 'candidates', 'psycho_ave', 'DECIMAL(4,2) NULL');
     ensure_column($conn, 'candidates', 'potential_ave', 'DECIMAL(4,2) NULL');
+    ensure_column($conn, 'candidates', 'salary_grade', 'TINYINT UNSIGNED NULL');
+    ensure_column($conn, 'candidates', 'user_id', 'INT NULL');
+    ensure_column($conn, 'candidate_scores', 'rated_by', 'INT NULL');
+    ensure_column($conn, 'candidate_scores', 'rated_at', 'DATETIME NULL');
     $conn->query("CREATE TABLE IF NOT EXISTS sheet_settings (id TINYINT PRIMARY KEY, hdr_hash VARCHAR(50) DEFAULT '#', hdr_name VARCHAR(100) DEFAULT 'Name', hdr_psycho_group VARCHAR(100) DEFAULT 'PSYCHO-SOCIAL', hdr_potential_group VARCHAR(100) DEFAULT 'POTENTIAL', hdr_core VARCHAR(50) DEFAULT 'CORE', hdr_org VARCHAR(50) DEFAULT 'ORG', hdr_psycho_extra1 VARCHAR(50) DEFAULT '', hdr_psycho_extra2 VARCHAR(50) DEFAULT '', hdr_psycho_extra3 VARCHAR(50) DEFAULT '', hdr_psycho_extra4 VARCHAR(50) DEFAULT '', hdr_psycho_ave VARCHAR(50) DEFAULT 'AVE.', hdr_func VARCHAR(50) DEFAULT 'FUNC', hdr_lead VARCHAR(50) DEFAULT 'LEAD', hdr_potential_extra1 VARCHAR(50) DEFAULT '', hdr_potential_extra2 VARCHAR(50) DEFAULT '', hdr_potential_extra3 VARCHAR(50) DEFAULT '', hdr_potential_extra4 VARCHAR(50) DEFAULT '', hdr_potential_ave VARCHAR(50) DEFAULT 'AVE.', hdr_remarks VARCHAR(100) DEFAULT 'REMARKS') DEFAULT CHARSET=utf8mb4");
     $conn->query("INSERT IGNORE INTO sheet_settings (id) VALUES (1)");
     ensure_column($conn, 'sheet_settings', 'hdr_remarks', "VARCHAR(100) DEFAULT 'REMARKS'");
