@@ -89,6 +89,43 @@ if (!in_array($office_name, $allowedOffices, true)) {
     respond(false, 'Please select a valid office.', 422, $wantsJson);
 }
 
+$submissionSalaryGrade = null;
+$isBasicPosition = false;
+if ($office_name === 'Regional Office') {
+    $scope = 'REGIONAL_OFFICE';
+    $positionStmt = $conn->prepare('SELECT salary_grade FROM positions WHERE office_scope = ? AND title = ? LIMIT 1');
+    $canonicalPositionTitle = canonical_position_title($position_title);
+    $positionStmt->bind_param('ss', $scope, $canonicalPositionTitle);
+    $positionStmt->execute();
+    $positionRow = $positionStmt->get_result()->fetch_assoc();
+    $positionStmt->close();
+    if ($positionRow) $submissionSalaryGrade = (int)$positionRow['salary_grade'];
+
+    $postedSalaryGrade = filter_var($_POST['salary_grade'] ?? null, FILTER_VALIDATE_INT);
+    $templateId = filter_var($_POST['competency_template_id'] ?? null, FILTER_VALIDATE_INT);
+    if ($submissionSalaryGrade === null && $templateId !== false && $templateId > 0) {
+        $templateStmt = $conn->prepare('SELECT title, min_salary_grade, max_salary_grade FROM competency_templates WHERE id = ? LIMIT 1');
+        $templateStmt->bind_param('i', $templateId);
+        $templateStmt->execute();
+        $templateRow = $templateStmt->get_result()->fetch_assoc();
+        $templateStmt->close();
+        if ($templateRow && $templateRow['min_salary_grade'] !== null && $templateRow['max_salary_grade'] !== null) {
+            $minimumGrade = (int)$templateRow['min_salary_grade'];
+            $maximumGrade = (int)$templateRow['max_salary_grade'];
+            if ($minimumGrade === $maximumGrade
+                && (string)$templateRow['title'] === 'SG ' . $minimumGrade . ' - ' . $canonicalPositionTitle) {
+                $submissionSalaryGrade = $minimumGrade;
+            } elseif ($postedSalaryGrade !== false && $postedSalaryGrade >= $minimumGrade && $postedSalaryGrade <= $maximumGrade) {
+                $submissionSalaryGrade = $postedSalaryGrade;
+            }
+        }
+    }
+    if ($submissionSalaryGrade === null && $postedSalaryGrade !== false && $postedSalaryGrade >= 0 && $postedSalaryGrade <= 26) {
+        $submissionSalaryGrade = $postedSalaryGrade;
+    }
+    $isBasicPosition = $submissionSalaryGrade !== null && position_is_basic_level($submissionSalaryGrade);
+}
+
 $sheet_id = (int)($_POST['sheet_id'] ?? 0);
 if ($sheet_id > 0) {
     $uid = (int)current_user_id();
@@ -144,7 +181,7 @@ foreach ($groups as $codes) {
     }
 }
 
-$hasLeadership = office_has_leadership($office_name, $position_title);
+$hasLeadership = !$isBasicPosition && office_has_leadership($office_name, $position_title);
 if (!$hasLeadership) {
     foreach (['lc1','lc2','lc3','lc4','lc5'] as $lc) {
         $ratings[$lc] = null;
@@ -177,7 +214,7 @@ if ($sheet_id > 0) {
                     $rateRaw = cleanRating($_POST[$rid] ?? null);
                     $evRaw   = mb_substr(trim($_POST['evidence_' . $rid] ?? ''), 0, 1000);
 
-                    $levelDefault = ($sectionKey === 'lead') ? 'Basic' : 'Advanced';
+                    $levelDefault = $isBasicPosition ? 'Basic' : (($sectionKey === 'lead') ? 'Basic' : 'Advanced');
                     $levelVal = $_POST['evtype_' . $rid] ?? $levelDefault;
 
                     $customRows[] = [
