@@ -1,4 +1,30 @@
 <?php
+const BASIC_MAX_SG = 9;
+
+function position_is_basic_level(int $salaryGrade): bool {
+    return $salaryGrade <= BASIC_MAX_SG;
+}
+
+function basic_core_competency_descriptions(): array {
+    return [
+        'cc1' => 'Practices ethical and professional behaviors',
+        'cc2' => "Complies with DENR's standards of service delivery",
+        'cc3' => 'Demonstrates virtue, goodness, honor, justness and decency at all times',
+        'cc4' => 'Observes the principle of transparency and accountability in the workplace with supervision and guidance',
+        'cc5' => 'Has knowledge of concepts and application of preservation and conservation of the environment',
+    ];
+}
+
+function basic_org_competency_descriptions(): array {
+    return [
+        'oc1' => 'Refers to and/or uses existing communication materials or templates to produce own written work',
+        'oc2' => 'Effectively delivers messages that simply focus on data, facts or information and requires minimal preparation or can be supported by available communication materials. Focus of communication is to relay information and/or data',
+        'oc3' => 'Applies basic technology (office software and equipment) in the performance of the assigned tasks. Collects, organizes and maintains data',
+        'oc4' => 'Assist in project management activities',
+        'oc5' => 'Practices basic knowledge of CSW to generate complete, accurate, relevant and timely output',
+    ];
+}
+
 if (!function_exists('rater_list')) {
     function rater_list(): array {
         return ['ADMIN', 'END-USER', 'CHIEF PERSONNEL SECTION', 'CHAIR', 'VICE-CHAIR', 'UNION', 'GAD', 'ALTERNATE'];
@@ -18,7 +44,6 @@ if (!function_exists('canonical_rater_name')) {
 }
 
 function ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
-    if (!app_allow_ddl()) return;
     try {
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return;
         $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
@@ -34,7 +59,6 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
 }
 
 function ensure_schema(mysqli $conn): void {
-    if (!app_allow_ddl()) return;
     $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
       `id` int(11) NOT NULL AUTO_INCREMENT, `candidate_name` varchar(255) DEFAULT NULL, `position_title` varchar(255) DEFAULT NULL,
       `office_location` varchar(100) DEFAULT NULL, `office_name` varchar(255) DEFAULT '', `interview_date` varchar(255) DEFAULT NULL,
