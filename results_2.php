@@ -211,14 +211,13 @@ foreach ($groupedCandidates as $officeKey => $list) {
         .excel-table th, .excel-table td { border: 1px solid #000000; padding: 5px 4px; text-align: center; vertical-align: middle; }
         .meta-row { background-color: #f2f2f2; font-weight: bold; }
         
-        .position-cell {
-            background-color: #FF99CC !important;
-            color: #000000;
-            font-weight: bold;
-            text-align: left;
-            padding: 6px 12px !important;
-        }
-
+.position-cell {
+    background-color: #FF99CC !important;
+    color: #FF0000;
+    font-weight: bold;
+    text-align: left;
+    padding: 6px 12px !important;
+}
         .col-green-ave { background-color: #c6e0b4; font-weight: bold; }
         .col-yellow-ave { background-color: #ffe699; font-weight: bold; }
         .rater-remove { cursor: pointer; color: #c0392b; font-weight: bold; margin-left: 3px; opacity: .55; }
