@@ -6,6 +6,7 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/competency_template_schema.php';
 require_once __DIR__ . '/AccessGroups.php';
+require_once __DIR__ . '/Raters.php';
 
 function sheets_json_out(array $payload, int $status = 200): void {
     if (ob_get_length()) ob_clean();
@@ -328,6 +329,9 @@ try {
         }
 
         $candidateGrade = (int)$gradeValue;
+        if (position_is_basic_level($candidateGrade)) {
+            sheets_json_out(['status' => 'error', 'message' => 'Basic-level forms do not have a Leadership section.'], 422);
+        }
         $userGrade = (int)$viewer['salary_grade'];
         $region = $viewer['region'];
         $fieldName = $viewer['field_name'];
