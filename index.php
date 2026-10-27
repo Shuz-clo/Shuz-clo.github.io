@@ -636,6 +636,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 <script>
     const CAN_SUBMIT = <?php echo $canSubmit ? 'true' : 'false'; ?>;
     const IS_ADMIN = <?php echo current_role() === 'admin' ? 'true' : 'false'; ?>;
+    const BASIC_MAX_SG = <?php echo json_encode(BASIC_MAX_SG); ?>;
+    const BASIC_CORE_DESCRIPTIONS = <?php echo json_encode(basic_core_competency_descriptions(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    const BASIC_ORG_DESCRIPTIONS = <?php echo json_encode(basic_org_competency_descriptions(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
     const ALL_POSITIONS = [
         "Accountant I", "Accountant II", "Accountant III", "Accounting Analyst",
@@ -1060,9 +1063,34 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         return positionInput ? positionInput.value.trim() : '';
     }
 
+    function currentSalaryGrade() {
+        const selectedGrade = Number(salaryGradeSelect.value);
+        if (salaryGradeSelect.value !== '' && Number.isInteger(selectedGrade)) return selectedGrade;
+        const positionGrade = salaryGradeFor(currentPosition());
+        return Number.isInteger(positionGrade) ? positionGrade : null;
+    }
+
+    function isBasicPosition() {
+        const salaryGrade = currentSalaryGrade();
+        return salaryGrade !== null && salaryGrade <= BASIC_MAX_SG;
+    }
+
     function applyFormLayout() {
         autofillSalaryGrade();
         const positionLeadershipLevel = leadershipLevelFor(currentPosition());
+        const basicPosition = isBasicPosition();
+        const leadSection = selectedTemplateLayout.sections?.lead?.standard ? selectedTemplateLayout.sections.lead : null;
+        const selectedTemplate = !!competencyTemplateIdInput.value;
+        const hideLeadership = basicPosition || (selectedTemplate && !leadSection);
+        document.getElementById('coreLevelLabel').textContent = basicPosition
+            ? 'Basic'
+            : (selectedTemplateLayout.sections?.core?.level || 'Evidence');
+        document.getElementById('orgLevelLabel').textContent = basicPosition
+            ? 'Basic'
+            : (selectedTemplateLayout.sections?.org?.level || 'Advanced');
+        document.getElementById('funcLevelLabel').textContent = basicPosition
+            ? 'Basic'
+            : (selectedTemplateLayout.sections?.func?.level || 'Advanced');
         const leadershipDescriptions = positionLeadershipLevel === 'I'
             ? LC_INTERMEDIATE
             : (positionLeadershipLevel === 'B' ? LC_BASIC_DEFAULT : LC_BASIC);
@@ -1074,12 +1102,20 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         }
 
         document.querySelectorAll('tr.leadership-row').forEach(row => {
-            row.classList.remove('is-hidden');
+            row.classList.toggle('is-hidden', hideLeadership);
             row.querySelectorAll('input, select, textarea').forEach(el => {
-                el.disabled = false;
+                if (hideLeadership) {
+                    if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+                    else el.value = '';
+                }
+                el.disabled = hideLeadership;
             });
         });
-        const canEditLabels = canEditTemplateLabels && !!competencyTemplateIdInput.value && !!leadSection;
+        if (!hideLeadership && !leadSection) {
+            leadershipHeadingInput.value = 'Leadership Competencies';
+            leadershipLevelInput.value = positionLeadershipLevel === 'I' ? 'Advanced' : 'Basic';
+        }
+        const canEditLabels = canEditTemplateLabels && selectedTemplate && !!leadSection?.standard && !hideLeadership;
         leadershipHeadingInput.disabled = !canEditLabels;
         leadershipLevelInput.disabled = !canEditLabels;
         if (typeof markEdited === 'function') markEdited();
@@ -1338,6 +1374,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     function applyStandardRows(layout) {
         const sections = (layout && layout.sections) || {};
+        const basicPosition = isBasicPosition();
         const functionalHeader = document.getElementById('sectionHeader_func');
         if (functionalHeader) {
             functionalHeader.classList.toggle('tpl-hidden', !!sections.func?.custom);
@@ -1374,7 +1411,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             titleRow.classList.toggle('tpl-hidden', hide);
             descRow.classList.toggle('tpl-hidden', hide);
             titleCell.textContent = row ? (row.title || '') : stdOriginals[id].title;
-            const desc = row ? (row.desc || '') : stdOriginals[id].desc;
+            let desc = row ? (row.desc || '') : stdOriginals[id].desc;
+            if (basicPosition && BASIC_CORE_DESCRIPTIONS[id]) desc = BASIC_CORE_DESCRIPTIONS[id];
+            if (basicPosition && BASIC_ORG_DESCRIPTIONS[id]) desc = BASIC_ORG_DESCRIPTIONS[id];
             if (isLead) LC_BASIC[Number(id.slice(2)) - 1] = desc;
             else descCell.textContent = desc;
         });
@@ -1517,6 +1556,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         customSectionsBody.replaceChildren();
         Object.entries(selectedTemplateLayout.sections).forEach(([sectionKey, section]) => {
             if (!section || !section.custom) return;
+            if (isBasicPosition() && sectionKey === 'lead') return;
             const header = document.createElement('tr');
             header.className = 'custom-section-row';
             const sectionTitle = document.createElement('th');
@@ -1678,7 +1718,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         if (event.target.matches('[data-custom-rating], [data-custom-evidence]')) markEdited();
     });
 
-    applyFormLayout();
+    applyStandardRows(selectedTemplateLayout);
     if (salaryGradeSelect.value !== '') {
         loadCompetencyTemplates().catch(error => {
             templateLoadStatus.textContent = error.message;
