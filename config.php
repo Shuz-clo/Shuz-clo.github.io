@@ -1,5 +1,4 @@
 <?php
-<?php
 if (is_file(__DIR__ . '/config.local.php')) require __DIR__ . '/config.local.php';
 if (!function_exists('app_allow_ddl')) {
     function app_allow_ddl(): bool {
