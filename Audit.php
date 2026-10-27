@@ -17,6 +17,7 @@
 // Logging must never block or undo the action it records, so every failure here is swallowed (and written to the error log).
 
 function ensure_audit_table(mysqli $conn): void {
+    if (!app_allow_ddl()) return;
     static $ready = false;
     if ($ready) return;
 

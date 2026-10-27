@@ -18,6 +18,7 @@ if (!function_exists('canonical_rater_name')) {
 }
 
 function ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
+    if (!app_allow_ddl()) return;
     try {
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return;
         $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
@@ -33,6 +34,7 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
 }
 
 function ensure_schema(mysqli $conn): void {
+    if (!app_allow_ddl()) return;
     $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
       `id` int(11) NOT NULL AUTO_INCREMENT, `candidate_name` varchar(255) DEFAULT NULL, `position_title` varchar(255) DEFAULT NULL,
       `office_location` varchar(100) DEFAULT NULL, `office_name` varchar(255) DEFAULT '', `interview_date` varchar(255) DEFAULT NULL,

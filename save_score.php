@@ -57,12 +57,12 @@ try {
     $conn->begin_transaction();
 
     $stmtUpdate = $conn->prepare("UPDATE candidates SET
-        candidate_name = ?, office_name = ?, office_location = ?, position_title = ?, interview_date = ?, remarks = ?
+        candidate_name = ?, office_name = ?, office_location = ?, position_title = ?, interview_date = ?
         WHERE id = ?");
 
     $stmtInsert = $conn->prepare("INSERT INTO candidates
-        (candidate_name, office_name, office_location, position_title, interview_date, remarks)
-        VALUES (?, ?, ?, ?, ?, ?)");
+        (candidate_name, office_name, office_location, position_title, interview_date)
+        VALUES (?, ?, ?, ?, ?)");
 
     $stmtDeleteScores = $conn->prepare("DELETE FROM candidate_scores WHERE candidate_id = ?");
     $stmtUpsertScore  = $conn->prepare("INSERT INTO candidate_scores (candidate_id, rater, psycho, potential)
@@ -85,8 +85,6 @@ try {
         if ($position === '') $position = 'UNASSIGNED';
         $position  = canonical_position_title($position);
 
-        $remarks   = mb_substr(trim($c['remarks'] ?? ''), 0, 2000);
-
         $interviewDate = mb_substr(trim($c['interviewDate'] ?? ''), 0, 255);
         if ($interviewDate === '') $interviewDate = date('F d, Y');
 
@@ -106,13 +104,13 @@ try {
         }
 
         if ($id > 0) {
-            $stmtUpdate->bind_param("ssssssi", $name, $office, $officeLoc, $position, $interviewDate, $remarks, $id);
+            $stmtUpdate->bind_param("sssssi", $name, $office, $officeLoc, $position, $interviewDate, $id);
             $stmtUpdate->execute();
             $candidateId = $id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $id];
             $action = 'edit';
         } elseif ($name !== '') {
-            $stmtInsert->bind_param("ssssss", $name, $office, $officeLoc, $position, $interviewDate, $remarks);
+            $stmtInsert->bind_param("sssss", $name, $office, $officeLoc, $position, $interviewDate);
             $stmtInsert->execute();
             $candidateId = $conn->insert_id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $candidateId];

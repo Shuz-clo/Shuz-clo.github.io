@@ -1,13 +1,12 @@
 <?php
 
+require_once __DIR__ . '/bootstrap.php';
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/Audit.php';
 require_once __DIR__ . '/AccessGroups.php';
-
-ensure_auth_schema($conn);
 
 if (is_logged_in()) {
     header('Location: ' . landing_page_for((string)current_role()));
@@ -23,6 +22,7 @@ $registrationCode = (defined('REGISTRATION_CODE') && REGISTRATION_CODE !== '') ?
 $error = '';
 $old   = ['username' => '', 'role' => 'rater', 'region' => 'Region VI', 'field_name' => '', 'salary_grade' => ''];
 $lockSecondsLeft = is_locked_out($conn);
+$salaryGrades = access_position_salary_grades($conn);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username   = preg_replace('/\s+/', ' ', trim((string)($_POST['username'] ?? '')));
@@ -63,8 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!in_array($fieldChoice, ACCESS_FIELDS, true)
         || ($fieldChoice === 'Other' && !access_field_is_valid($fieldOther))) {
         $error = 'Please choose a valid field. Enter a name when selecting Other.';
-    } elseif (!access_salary_grade_is_valid($salaryGradeValue)) {
-        $error = 'Please choose a valid salary grade from 0 to 25.';
+    } elseif (!access_position_salary_grade_is_valid($conn, $salaryGradeValue, $salaryGrades)) {
+        $error = 'Please choose a salary grade that exists for Regional Office positions.';
     } elseif (isset($_SESSION['last_register']) && (time() - $_SESSION['last_register']) < 5) {
         $error = 'Please wait a few seconds before trying again.';
     } elseif (!preg_match('/^[\p{L}0-9 .\-]{3,100}$/u', $username)) {
@@ -252,12 +252,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="field">
                 <label for="salary_grade">Salary Grade</label>
-                <input type="number" id="salary_grade" name="salary_grade" required
-                       min="0" max="25" step="1" inputmode="numeric"
-                       value="<?php echo htmlspecialchars($old['salary_grade'], ENT_QUOTES, 'UTF-8'); ?>"
-                       placeholder="Enter your salary grade (0-25)"
-                       <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                <select id="salary_grade" name="salary_grade" required
+                        <?php echo ($lockSecondsLeft !== null || !$salaryGrades) ? 'disabled' : ''; ?>>
+                    <option value="">-- Select salary grade --</option>
+                    <?php foreach ($salaryGrades as $grade): ?>
+                        <option value="<?php echo $grade; ?>" <?php echo (string)$old['salary_grade'] === (string)$grade ? 'selected' : ''; ?>>
+                            <?php echo $grade; ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
                 <div class="hint">Your grade controls which competency forms are available to you.</div>
+                <?php if (!$salaryGrades): ?>
+                    <div class="hint">No Regional Office salary grades are available yet. Ask an administrator to seed or import positions.</div>
+                <?php endif; ?>
             </div>
 
             <div class="field">

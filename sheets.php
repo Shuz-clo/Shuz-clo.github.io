@@ -12,11 +12,7 @@ purge_expired_tokens($conn);
 
 require_login();
 
-if (current_role() === 'admin') {
-    header('Location: results_2.php');
-    exit;
-}
-require_role(['rater', 'user']);
+require_role(['admin', 'rater', 'user']);
 
 $evidenceOptions = load_evidence_options($conn);
 
@@ -299,6 +295,54 @@ $todayDate = date('F j, Y');
   function setStatus(text) { const el = $('status'); if (el) el.textContent = text; }
   function posCompact(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
+  function normalizePositionSearch(s) {
+    const roman = { I:'1', II:'2', III:'3', IV:'4', V:'5', VI:'6', VII:'7', VIII:'8', IX:'9', X:'10', XI:'11' };
+    return String(s || '').toUpperCase()
+      .replace(/&/g, ' AND ')
+      .replace(/[A-Z]+/g, function (word) { return roman[word] || word; })
+      .replace(/[^A-Z0-9]/g, '')
+      .toLowerCase();
+  }
+
+  function positionSearchForms(title) {
+    const forms = new Set([posCompact(title).toLowerCase(), normalizePositionSearch(title)]);
+    const aliasKeys = Object.keys(POSITION_ALIASES).filter(function (key) {
+      return POSITION_ALIASES[key] === title;
+    });
+    aliasKeys.forEach(function (key) { forms.add(posCompact(key).toLowerCase()); });
+
+    const variants = [String(title || ''), String(title || '').replace(/\([^)]*\)/g, ' ')];
+    variants.forEach(function (variant) {
+      const words = String(variant).toUpperCase().replace(/&/g, ' AND ')
+        .replace(/[^A-Z0-9\s]/g, ' ').trim().split(/\s+/)
+        .map(function (word) {
+          return { I:'1', II:'2', III:'3', IV:'4', V:'5', VI:'6', VII:'7', VIII:'8', IX:'9', X:'10', XI:'11' }[word] || word;
+        }).filter(function (word) { return word && word !== 'AND'; });
+      if (words.length === 0) return;
+
+      const suffix = /^\d+$/.test(words[words.length - 1]) ? words[words.length - 1] : '';
+      const nameWords = suffix ? words.slice(0, -1) : words;
+      if (nameWords.length) {
+        forms.add(nameWords.map(function (word) { return word[0]; }).join('').toLowerCase() + suffix);
+        for (let length = 2; length <= Math.min(nameWords[0].length, 5); length++) {
+          const abbreviated = nameWords[0].slice(0, length)
+            + nameWords.slice(1).map(function (word) { return word[0]; }).join('');
+          forms.add((abbreviated + suffix).toLowerCase());
+        }
+      }
+    });
+    return Array.from(forms).filter(Boolean);
+  }
+
+  function positionMatchesSearch(title, query) {
+    const compactQuery = posCompact(query).toLowerCase();
+    const normalizedQuery = normalizePositionSearch(query);
+    if (!compactQuery) return true;
+    return positionSearchForms(title).some(function (form) {
+      return form.indexOf(compactQuery) !== -1 || (normalizedQuery && form.indexOf(normalizedQuery) !== -1);
+    });
+  }
+
   const POSITION_LOOKUP = (function () {
     const map = {};
     ALL_POSITIONS.forEach(function (t) { map[posCompact(t)] = t; });
@@ -314,6 +358,8 @@ $todayDate = date('F j, Y');
     if (raw === '') return '';
     const key = posCompact(raw);
     if (key in POSITION_LOOKUP) return POSITION_LOOKUP[key];
+    const matches = ALL_POSITIONS.filter(function (title) { return positionMatchesSearch(title, raw); });
+    if (matches.length === 1) return matches[0];
     return raw;
   }
 
@@ -368,8 +414,10 @@ $todayDate = date('F j, Y');
 
   function renderPositionDropdown(inputEl, dropdownEl, filter) {
     if (!dropdownEl) return;
-    const q = posCompact(filter);
-    const matches = ALL_POSITIONS.filter(function (t) { return posCompact(t).indexOf(q) !== -1; });
+    const resolved = canonicalPositionTitle(filter);
+    const matches = ALL_POSITIONS.indexOf(resolved) !== -1
+      ? [resolved]
+      : ALL_POSITIONS.filter(function (t) { return positionMatchesSearch(t, filter); });
     dropdownEl.innerHTML = '';
     if (matches.length === 0) {
       const d = document.createElement('div');

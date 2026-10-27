@@ -1,23 +1,7 @@
 <?php
 
 const ACCESS_REGIONS = [
-    'NCR' => 'National Capital Region (NCR)',
-    'CAR' => 'Cordillera Administrative Region (CAR)',
-    'Region I' => 'Ilocos Region (Region I)',
-    'Region II' => 'Cagayan Valley (Region II)',
-    'Region III' => 'Central Luzon (Region III)',
-    'Region IV-A' => 'CALABARZON (Region IV-A)',
-    'MIMAROPA' => 'MIMAROPA Region',
-    'Region V' => 'Bicol Region (Region V)',
     'Region VI' => 'Western Visayas (Region VI)',
-    'Region VII' => 'Central Visayas (Region VII)',
-    'Region VIII' => 'Eastern Visayas (Region VIII)',
-    'Region IX' => 'Zamboanga Peninsula (Region IX)',
-    'Region X' => 'Northern Mindanao (Region X)',
-    'Region XI' => 'Davao Region (Region XI)',
-    'Region XII' => 'SOCCSKSARGEN (Region XII)',
-    'Region XIII' => 'Caraga (Region XIII)',
-    'BARMM' => 'Bangsamoro Autonomous Region in Muslim Mindanao (BARMM)',
 ];
 
 const ACCESS_FIELDS = [
@@ -30,6 +14,7 @@ const ACCESS_FIELDS = [
     'Administration',
     'Planning',
     'Legal',
+    'Regional Office',
     'Other',
 ];
 
@@ -42,7 +27,33 @@ function access_field_is_valid($value): bool {
 }
 
 function access_salary_grade_is_valid($value): bool {
-    return (is_int($value) || (is_string($value) && preg_match('/^(0|[1-9]|1[0-9]|2[0-5])$/', $value)))
+    return (is_int($value) || (is_string($value) && preg_match('/^(0|[1-9]|1[0-9]|2[0-6])$/', $value)))
         && (int)$value >= 0
-        && (int)$value <= 25;
+        && (int)$value <= 26;
+}
+
+function access_position_salary_grades(mysqli $conn): array {
+    $stmt = $conn->prepare("SELECT DISTINCT salary_grade
+        FROM positions
+        WHERE office_scope = 'REGIONAL_OFFICE'
+        ORDER BY salary_grade ASC");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $grades = [];
+    while ($row = $result->fetch_assoc()) {
+        $grade = (int)$row['salary_grade'];
+        if (access_salary_grade_is_valid($grade)) {
+            $grades[] = $grade;
+        }
+    }
+    $stmt->close();
+    return $grades;
+}
+
+function access_position_salary_grade_is_valid(mysqli $conn, $value, ?array $grades = null): bool {
+    if (!access_salary_grade_is_valid($value)) {
+        return false;
+    }
+    $grades = $grades ?? access_position_salary_grades($conn);
+    return in_array((int)$value, $grades, true);
 }

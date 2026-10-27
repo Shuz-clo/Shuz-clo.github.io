@@ -13,24 +13,141 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/PositionsSchema.php';
+require_once __DIR__ . '/AccessGroups.php';
 
 ensure_auth_schema($conn);
+ensure_positions_schema($conn);
 purge_expired_tokens($conn);
 
 require_login();
 $scoringProfile = find_user_access_profile($conn, (int)current_user_id());
+$selectedPositionTitle = trim((string)($_GET['position_title'] ?? ''));
+if (mb_strlen($selectedPositionTitle) > 255) {
+    $selectedPositionTitle = '';
+}
+
+function show_position_access_error(string $title, string $message, ?int $salaryGrade = null): void {
+    http_response_code(403);
+    $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+    $safeMessage = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+    $gradeMessage = $salaryGrade === null
+        ? ''
+        : '<p class="grade">Your assigned salary grade <strong>SG ' . $salaryGrade . '</strong> can only open matching positions.</p>';
+    echo '<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>' . $safeTitle . '</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; background: #f3f6f4; color: #202124; font-family: Arial, Helvetica, sans-serif; }
+        main { width: min(100%, 520px); padding: 36px; text-align: center; background: #fff; border: 1px solid #e0e7e2; border-radius: 16px; box-shadow: 0 12px 36px rgba(22, 54, 36, .10); }
+        .icon { width: 58px; height: 58px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 50%; background: #fff3e8; color: #a64b12; font-size: 30px; font-weight: 700; }
+        h1 { margin: 0 0 12px; font-size: 24px; }
+        p { margin: 0; color: #59635d; line-height: 1.6; }
+        .grade { margin-top: 14px; padding: 12px; border-radius: 8px; background: #f4f8f5; color: #35443a; }
+        .actions { margin-top: 24px; }
+        a { display: inline-block; padding: 12px 18px; border-radius: 8px; background: #107c41; color: #fff; font-weight: 700; text-decoration: none; transition: background-color .15s ease, transform .15s ease; }
+        a:hover { background: #0b6634; transform: translateY(-1px); }
+        a:focus-visible { outline: 3px solid rgba(16, 124, 65, .3); outline-offset: 3px; }
+        @media (max-width: 480px) { main { padding: 28px 22px; } h1 { font-size: 21px; } }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="icon" aria-hidden="true">!</div>
+        <h1>' . $safeTitle . '</h1>
+        <p>' . $safeMessage . '</p>
+        ' . $gradeMessage . '
+        <div class="actions"><a href="sheet_picker.php">Back to position list</a></div>
+    </main>
+</body>
+</html>';
+    exit;
+}
+
 $initialCandidateGrade = $scoringProfile['salary_grade'] ?? null;
-if (!is_int($initialCandidateGrade) || $initialCandidateGrade < 0 || $initialCandidateGrade > 25) {
+if (!is_int($initialCandidateGrade) || $initialCandidateGrade < 0 || $initialCandidateGrade > 26) {
     $initialCandidateGrade = null;
+}
+if (isset($_GET['salary_grade'])) {
+    $requestedGrade = filter_var($_GET['salary_grade'], FILTER_VALIDATE_INT);
+    if ($requestedGrade !== false && $requestedGrade >= 0 && $requestedGrade <= 26) {
+        $initialCandidateGrade = $requestedGrade;
+    }
 }
 
 if (current_role() === 'admin' && !isset($_GET['template_id'])) {
     header('Location: results_2.php');
     exit;
 }
+if (current_role() === 'rater' && !isset($_GET['template_id'])) {
+    header('Location: sheet_picker.php');
+    exit;
+}
 
 if (current_role() !== 'admin') {
     require_role(['rater']);
+}
+
+if (current_role() === 'rater') {
+    $profileGrade = $scoringProfile['salary_grade'] ?? null;
+    $requestedGrade = filter_var($_GET['salary_grade'] ?? null, FILTER_VALIDATE_INT);
+    $templateId = filter_var($_GET['template_id'] ?? null, FILTER_VALIDATE_INT);
+    if (!access_salary_grade_is_valid($profileGrade)
+        || !array_key_exists((string)($scoringProfile['region'] ?? ''), ACCESS_REGIONS)
+        || !access_field_is_valid($scoringProfile['field_name'] ?? null)
+        || $requestedGrade === false
+        || $requestedGrade !== (int)$profileGrade
+        || $selectedPositionTitle === ''
+        || $templateId === false
+        || $templateId < 1) {
+        show_position_access_error(
+            'Position unavailable',
+            'This link is missing valid position details or does not match the salary grade assigned to your account.',
+            access_salary_grade_is_valid($profileGrade) ? (int)$profileGrade : null
+        );
+    }
+
+    $scope = 'REGIONAL_OFFICE';
+    $positionStmt = $conn->prepare('SELECT 1 FROM positions WHERE office_scope = ? AND title = ? AND salary_grade = ? LIMIT 1');
+    $positionStmt->bind_param('ssi', $scope, $selectedPositionTitle, $requestedGrade);
+    $positionStmt->execute();
+    $positionIsAllowed = $positionStmt->get_result()->num_rows > 0;
+    $positionStmt->close();
+    if (!$positionIsAllowed) {
+        show_position_access_error(
+            'Position unavailable',
+            'You can only open positions at the salary grade assigned to your account.',
+            (int)$profileGrade
+        );
+    }
+
+    require_once __DIR__ . '/competency_template_schema.php';
+    ensure_competency_template_schema($conn);
+    $templateTitle = 'SG ' . $requestedGrade . ' - ' . $selectedPositionTitle;
+    $region = (string)$scoringProfile['region'];
+    $fieldName = (string)$scoringProfile['field_name'];
+    $templateStmt = $conn->prepare('SELECT 1 FROM competency_templates
+        WHERE id = ? AND title = ? AND is_shared = 1
+            AND min_salary_grade <= ? AND max_salary_grade >= ?
+            AND (region IS NULL OR region = ?)
+            AND (field_name IS NULL OR field_name = ?)
+        LIMIT 1');
+    $templateStmt->bind_param('isiiss', $templateId, $templateTitle, $requestedGrade, $requestedGrade, $region, $fieldName);
+    $templateStmt->execute();
+    $templateIsAllowed = $templateStmt->get_result()->num_rows > 0;
+    $templateStmt->close();
+    if (!$templateIsAllowed) {
+        show_position_access_error(
+            'Scoring form unavailable',
+            'A shared scoring form for this position and salary grade could not be found. Please choose another position or ask an administrator to share its form.',
+            (int)$profileGrade
+        );
+    }
+    $initialCandidateGrade = (int)$profileGrade;
 }
 
 $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
@@ -173,6 +290,48 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
         .btn-container { margin-top: 20px; text-align: center; }
 
+        .form-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: -4px 0 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e2e7e3;
+        }
+        .form-toolbar-group { display: flex; align-items: center; gap: 8px; }
+        .form-toolbar a, .form-toolbar button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 36px;
+            margin: 0;
+            padding: 8px 13px;
+            border: 1px solid #d5ddd7;
+            border-radius: 7px;
+            background: #fff;
+            color: #344139;
+            font: inherit;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+        }
+        .form-toolbar a:hover, .form-toolbar button:hover:not(:disabled) {
+            border-color: #107c41;
+            background: #f3faf5;
+            color: #0c6635;
+        }
+        .form-toolbar button:disabled { cursor: not-allowed; opacity: .48; }
+        .form-toolbar .reset-button { color: #8d3a32; }
+        .form-toolbar .reset-button:hover { border-color: #c8736b; background: #fff7f6; color: #8d3a32; }
+        @media (max-width: 520px) {
+            .form-toolbar { align-items: stretch; flex-direction: column; }
+            .form-toolbar-group { justify-content: space-between; }
+            .form-toolbar-group > * { flex: 1; }
+        }
+        @media print { .form-toolbar { display: none !important; } }
+
         button {
             padding: 8px 18px;
             font-size: 14px;
@@ -209,6 +368,16 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
 <input type="hidden" name="custom_competencies_json" id="customCompetenciesJson" value="[]">
 <input type="hidden" name="competency_template_id" id="competencyTemplateId" value="">
+<?php if (current_role() === 'rater'): ?>
+<input type="hidden" name="salary_grade" id="salaryGrade" value="<?php echo (int)$initialCandidateGrade; ?>">
+<div class="form-toolbar">
+    <a id="positionBackBtn" href="sheet_picker.php">← Back to position picker</a>
+    <div class="form-toolbar-group">
+        <button type="button" id="undoButton" onclick="undoLastChange()" disabled>Undo</button>
+        <button type="reset" class="reset-button">Reset form</button>
+    </div>
+</div>
+<?php endif; ?>
 
 <table>
     <colgroup>
@@ -228,7 +397,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         <td colspan="2" class="info-cell"><span data-sheet-label="position">Position:</span>
             <span class="position-wrap">
                 <input type="text" name="position_title" id="position_input"
+                       value="<?php echo htmlspecialchars($selectedPositionTitle, ENT_QUOTES, 'UTF-8'); ?>"
                        placeholder="Type or pick a position title" required
+                       <?php echo current_role() === 'rater' && $selectedPositionTitle !== '' ? 'readonly' : ''; ?>
                        autocomplete="off" spellcheck="false"
                        maxlength="255">
                 <div id="positionDropdown" role="listbox"></div>
@@ -246,7 +417,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 <option value="PENRO Antique">PENRO Antique</option>
                 <option value="PENRO Guimaras">PENRO Guimaras</option>
                 <option value="PENRO Negros Occidental">PENRO Negros Occidental</option>
-                <option value="Regional Office">Regional Office</option>
+                <option value="Regional Office" <?php echo current_role() === 'rater' && $selectedPositionTitle !== '' ? 'selected' : ''; ?>>Regional Office</option>
             </select>
         </td>
     </tr>
@@ -254,15 +425,17 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         <td class="info-cell"></td>
         <td colspan="2" class="info-cell" style="padding-bottom: 15px;"><span data-sheet-label="interview_date">Date:</span> <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" autocomplete="off" style="width: 70%; display: inline-block;"></td>
     </tr>
+    <?php if (current_role() === 'admin'): ?>
     <tr class="template-selection-row">
         <td class="info-cell"><span data-sheet-label="candidate_salary_grade">Candidate salary grade:</span></td>
         <td colspan="2" class="info-cell">
             <input type="number" name="salary_grade" id="salaryGrade" required
-                   min="0" max="25" step="1" inputmode="numeric"
+                   min="0" max="26" step="1" inputmode="numeric"
                    value="<?php echo $initialCandidateGrade === null ? '' : $initialCandidateGrade; ?>"
-                   placeholder="Enter salary grade (0-25)" style="width: 70%; display: inline-block;">
+                   placeholder="Enter salary grade (0-26)" style="width: 70%; display: inline-block;">
         </td>
     </tr>
+    <?php endif; ?>
     <tr class="template-selection-row">
         <td class="info-cell"><span data-sheet-label="competency_template">Competency template:</span></td>
         <td colspan="2" class="info-cell">
@@ -462,6 +635,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
 <script>
     const CAN_SUBMIT = <?php echo $canSubmit ? 'true' : 'false'; ?>;
+    const IS_ADMIN = <?php echo current_role() === 'admin' ? 'true' : 'false'; ?>;
 
     const ALL_POSITIONS = [
         "Accountant I", "Accountant II", "Accountant III", "Accounting Analyst",
@@ -510,6 +684,50 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     }
 
+    function normalizeSearchText(value) {
+        const text = String(value || '').toLowerCase().trim();
+        if (text === '') return '';
+        const noAmp = text.replace(/&/g, 'and');
+        const cleaned = noAmp.replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const romanMap = {
+            'iv': '4', 'iii': '3', 'ii': '2', 'i': '1',
+            'v': '5', 'vi': '6', 'vii': '7', 'viii': '8',
+            'ix': '9', 'x': '10', 'xi': '11'
+        };
+        let normalized = cleaned;
+        Object.entries(romanMap).forEach(([roman, digit]) => {
+            normalized = normalized.replace(new RegExp('\\b' + roman + '\\b', 'g'), digit);
+        });
+        normalized = normalized
+            .replace(/\battorney\b/g, 'atty')
+            .replace(/\bplanning officer\b/g, 'plo')
+            .replace(/\bproject evaluation officer\b/g, 'peo')
+            .replace(/\bdevelopment management officer\b/g, 'dmo')
+            .replace(/\badministrative officer\b/g, 'adof')
+            .replace(/\badministrative assistant\b/g, 'adas')
+            .replace(/\badministrative aide\b/g, 'ada')
+            .replace(/\bforest technician\b/g, 'ft')
+            .replace(/\bforester\b/g, 'for')
+            .replace(/\bland management officer\b/g, 'lmo')
+            .replace(/\bcommunity environment and natural resources officer\b/g, 'cenro')
+            .replace(/\bprovincial environment and natural resources officer\b/g, 'penro')
+            .replace(/\binformation systems analyst\b/g, 'isa')
+            .replace(/\bcartographer\b/g, 'cg')
+            .replace(/\bengineer\b/g, 'eng')
+            .replace(/\becosystems management specialist\b/g, 'ems')
+            .replace(/\bsupervising administrative officer\b/g, 'sao')
+            .replace(/\bsupervising ecosystems management specialist\b/g, 'svems')
+            .replace(/\bsenior ecosystems management specialist\b/g, 'srems')
+            .replace(/\bsenior communications development officer\b/g, 'srcdo')
+            .replace(/\bchief ecosystems management specialist\b/g, 'cecms')
+            .replace(/\bchief administrative officer\b/g, 'caof')
+            .replace(/\bcommunity environment and natural resources officer \(cenro\)\b/g, 'cenro')
+            .replace(/\bgeodetic engineer\b/g, 'ge');
+        return normalized.replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+    }
+
     const POSITION_ALIASES = {
         'ATY5': 'Attorney V', 'ATTY5': 'Attorney V', 'ATTORNEYV': 'Attorney V',
         'ATY4': 'Attorney IV', 'ATTY4': 'Attorney IV', 'ATTORNEYIV': 'Attorney IV',
@@ -551,29 +769,91 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     const POSITION_LOOKUP = (function () {
         const map = {};
-        ALL_POSITIONS.forEach(title => { map[posCompact(title)] = title; });
+        ALL_POSITIONS.forEach(title => {
+            const compact = posCompact(title);
+            map[compact] = title;
+            map[normalizeSearchText(title)] = title;
+        });
         Object.keys(POSITION_ALIASES).forEach(k => {
             const canonical = POSITION_ALIASES[k];
             if (ALL_POSITIONS.includes(canonical) && !(k in map)) {
                 map[k] = canonical;
             }
+            const normalized = normalizeSearchText(k);
+            if (normalized && !(normalized in map)) map[normalized] = canonical;
         });
         return map;
     })();
 
+    function positionSearchForms(title) {
+        const forms = new Set([posCompact(title).toLowerCase(), normalizeSearchText(title)]);
+        Object.keys(POSITION_ALIASES).forEach(alias => {
+            if (POSITION_ALIASES[alias] === title) {
+                forms.add(posCompact(alias).toLowerCase());
+                forms.add(normalizeSearchText(alias));
+            }
+        });
+
+        const variants = [String(title || ''), String(title || '').replace(/\([^)]*\)/g, ' ')];
+        variants.forEach(variant => {
+            const words = String(variant).toUpperCase().replace(/&/g, ' AND ')
+                .replace(/[^A-Z0-9\s]/g, ' ').trim().split(/\s+/)
+                .map(word => ({
+                    I:'1', II:'2', III:'3', IV:'4', V:'5', VI:'6', VII:'7',
+                    VIII:'8', IX:'9', X:'10', XI:'11'
+                }[word] || word))
+                .filter(word => word && word !== 'AND');
+            if (!words.length) return;
+
+            const suffix = /^\d+$/.test(words[words.length - 1]) ? words[words.length - 1] : '';
+            const nameWords = suffix ? words.slice(0, -1) : words;
+            if (!nameWords.length) return;
+
+            forms.add(nameWords.map(word => word[0]).join('').toLowerCase() + suffix);
+            for (let length = 2; length <= Math.min(nameWords[0].length, 5); length++) {
+                const abbreviated = nameWords[0].slice(0, length)
+                    + nameWords.slice(1).map(word => word[0]).join('');
+                forms.add((abbreviated + suffix).toLowerCase());
+            }
+        });
+        return Array.from(forms).filter(Boolean);
+    }
+
+    function positionMatchesSearch(title, query) {
+        const compactQuery = posCompact(query).toLowerCase();
+        const normalizedQuery = normalizeSearchText(query);
+        if (!compactQuery) return true;
+        return positionSearchForms(title).some(form =>
+            form.includes(compactQuery) || (normalizedQuery && form.includes(normalizedQuery))
+        );
+    }
+
     function canonicalPositionTitle(typed) {
         const raw = String(typed || '').trim();
         if (raw === '') return '';
-        const key = posCompact(raw);
-        if (key in POSITION_LOOKUP) return POSITION_LOOKUP[key];
+        const direct = posCompact(raw);
+        if (direct in POSITION_LOOKUP) return POSITION_LOOKUP[direct];
+        const normalized = normalizeSearchText(raw);
+        if (normalized in POSITION_LOOKUP) return POSITION_LOOKUP[normalized];
+        const matches = ALL_POSITIONS.filter(title => positionMatchesSearch(title, raw));
+        if (matches.length === 1) return matches[0];
         return raw;
     }
 
     let activeIndex = -1;
 
     function renderPositionDropdown(filter) {
-        const q = posCompact(filter);
-        const matches = ALL_POSITIONS.filter(t => posCompact(t).includes(q));
+        const raw = String(filter || '');
+        let sourcePositions = ALL_POSITIONS;
+        if (RESTRICT_DROPDOWN_TO_API_LIST
+            && document.getElementById('office_name').value === 'Regional Office'
+            && positionApiTitles.length > 0) {
+            sourcePositions = positionApiTitles;
+        }
+        const resolved = canonicalPositionTitle(raw);
+        const matches = sourcePositions.includes(resolved)
+            ? [resolved]
+            : sourcePositions.filter(title => positionMatchesSearch(title, raw));
         positionDropdown.innerHTML = '';
 
         if (matches.length === 0) {
@@ -608,7 +888,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         activeIndex = -1;
     }
 
-    positionInput.addEventListener('focus', () => renderPositionDropdown(positionInput.value));
+    positionInput.addEventListener('focus', () => {
+        if (!positionInput.readOnly) renderPositionDropdown(positionInput.value);
+    });
     positionInput.addEventListener('input', () => {
         activeIndex = -1;
         renderPositionDropdown(positionInput.value);
@@ -616,6 +898,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     });
 
     positionInput.addEventListener('keydown', (e) => {
+        if (positionInput.readOnly) return;
         if (!positionDropdown.classList.contains('open')) {
             if (e.key === 'ArrowDown') { renderPositionDropdown(positionInput.value); e.preventDefault(); }
             return;
@@ -648,6 +931,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     });
 
     positionInput.addEventListener('blur', () => {
+        if (positionInput.readOnly) return;
         setTimeout(() => {
             if (!positionDropdown.contains(document.activeElement)) {
                 positionInput.value = canonicalPositionTitle(positionInput.value);
@@ -693,6 +977,10 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         ["PENRO","","I"]
     ];
     const NUMERAL_DIGIT = { II: "2", III: "3", IV: "4", V: "5" };
+    let POSITION_SG_MAP = {};
+    let positionApiTitles = [];
+    let lastAutoSgPosition = '';
+    const RESTRICT_DROPDOWN_TO_API_LIST = false;
 
     const LC_INTERMEDIATE = [
         "Ensures that others support the DENR’s mission, goals, agenda, climate, and policy",
@@ -711,6 +999,36 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     function compactNoParens(s) {
         return compactPosition(String(s || '').replace(/\([^)]*\)/g, ' '));
     }
+
+    function salaryGradeFor(position) {
+        const full = compactPosition(position);
+        if (full === '') return null;
+        if (Object.prototype.hasOwnProperty.call(POSITION_SG_MAP, full)) return POSITION_SG_MAP[full];
+        const base = compactNoParens(position);
+        return Object.prototype.hasOwnProperty.call(POSITION_SG_MAP, base) ? POSITION_SG_MAP[base] : null;
+    }
+
+    function autofillSalaryGrade() {
+        const office = document.getElementById('office_name');
+        if (!office || office.value !== 'Regional Office') {
+            lastAutoSgPosition = '';
+            return;
+        }
+        const key = compactPosition(currentPosition());
+        if (key === '' || key === lastAutoSgPosition) return;
+        const salaryGrade = salaryGradeFor(currentPosition());
+        if (salaryGrade === null) return;
+        const input = document.getElementById('salaryGrade');
+        if (!input) return;
+        input.value = String(salaryGrade);
+        lastAutoSgPosition = key;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    document.getElementById('office_name').addEventListener('change', () => {
+        lastAutoSgPosition = '';
+        autofillSalaryGrade();
+    });
 
     const LEADERSHIP_LEVEL_MAP = (function () {
         const map = {};
@@ -743,8 +1061,16 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     }
 
     function applyFormLayout() {
+        autofillSalaryGrade();
+        const positionLeadershipLevel = leadershipLevelFor(currentPosition());
+        const leadershipDescriptions = positionLeadershipLevel === 'I'
+            ? LC_INTERMEDIATE
+            : (positionLeadershipLevel === 'B' ? LC_BASIC_DEFAULT : LC_BASIC);
         for (let i = 1; i <= 5; i++) {
-            document.getElementById('lcDesc' + i).textContent = LC_BASIC[i - 1];
+            document.getElementById('lcDesc' + i).textContent = leadershipDescriptions[i - 1];
+        }
+        if (positionLeadershipLevel && !selectedTemplateLayout.sections?.lead) {
+            leadershipLevelInput.value = positionLeadershipLevel === 'I' ? 'Advanced' : 'Basic';
         }
 
         document.querySelectorAll('tr.leadership-row').forEach(row => {
@@ -774,10 +1100,99 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     });
 
     document.getElementById('scoringForm').addEventListener('reset', () => {
-        setTimeout(() => { positionInput.value = ''; closePositionDropdown(); applyFormLayout(); }, 0);
+        setTimeout(() => {
+            if (IS_ADMIN) {
+                positionInput.value = '';
+                lastAutoSgPosition = '';
+            } else {
+                positionInput.value = <?php echo json_encode($selectedPositionTitle, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+                lastAutoSgPosition = positionInput.value;
+            }
+            closePositionDropdown();
+            applyFormLayout();
+        }, 0);
     });
 
     let raterClickOrder = [];
+    const undoButton = document.getElementById('undoButton');
+    const undoHistory = [];
+    const lastControlStates = new WeakMap();
+    let restoringUndoState = false;
+
+    function readControlState(control) {
+        return {
+            value: control.value,
+            checked: 'checked' in control ? control.checked : undefined
+        };
+    }
+
+    function sameControlState(a, b) {
+        return a && b && a.value === b.value && a.checked === b.checked;
+    }
+
+    function updateUndoButton() {
+        if (!undoButton) return;
+        undoButton.disabled = undoHistory.length === 0;
+        undoButton.textContent = undoHistory.length > 0 ? 'Undo (' + undoHistory.length + ')' : 'Undo';
+    }
+
+    function clearUndoHistory() {
+        undoHistory.length = 0;
+        document.querySelectorAll('#scoringForm input, #scoringForm select, #scoringForm textarea').forEach(control => {
+            lastControlStates.set(control, readControlState(control));
+        });
+        updateUndoButton();
+    }
+
+    function recordUndoChange(event) {
+        if (restoringUndoState || !undoButton) return;
+        const control = event.target;
+        if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)
+            || control.type === 'hidden'
+            || control.type === 'button'
+            || control.type === 'submit'
+            || control.type === 'reset') return;
+
+        const previous = lastControlStates.get(control);
+        const current = readControlState(control);
+        if (previous && !sameControlState(previous, current)) {
+            undoHistory.push({ control, state: previous });
+            updateUndoButton();
+        }
+        lastControlStates.set(control, current);
+    }
+
+    function undoLastChange() {
+        const entry = undoHistory.pop();
+        if (!entry || !entry.control.isConnected) {
+            updateUndoButton();
+            return;
+        }
+
+        restoringUndoState = true;
+        entry.control.value = entry.state.value;
+        if (entry.state.checked !== undefined) entry.control.checked = entry.state.checked;
+        lastControlStates.set(entry.control, readControlState(entry.control));
+        entry.control.dispatchEvent(new Event('input', { bubbles: true }));
+        entry.control.dispatchEvent(new Event('change', { bubbles: true }));
+        restoringUndoState = false;
+        updateUndoButton();
+    }
+
+    if (undoButton) {
+        const scoringForm = document.getElementById('scoringForm');
+        scoringForm.querySelectorAll('input, select, textarea').forEach(control => {
+            lastControlStates.set(control, readControlState(control));
+        });
+        scoringForm.addEventListener('focusin', event => {
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement) {
+                if (!lastControlStates.has(event.target)) lastControlStates.set(event.target, readControlState(event.target));
+            }
+        });
+        scoringForm.addEventListener('input', recordUndoChange);
+        scoringForm.addEventListener('change', recordUndoChange);
+        scoringForm.addEventListener('reset', () => setTimeout(clearUndoHistory, 0));
+    }
 
     function selectedRaters() {
         return Array.from(document.querySelectorAll('input.rater-check:checked'));
@@ -923,6 +1338,10 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     function applyStandardRows(layout) {
         const sections = (layout && layout.sections) || {};
+        const functionalHeader = document.getElementById('sectionHeader_func');
+        if (functionalHeader) {
+            functionalHeader.classList.toggle('tpl-hidden', !!sections.func?.custom);
+        }
         const leadSection = sections.lead && sections.lead.standard ? sections.lead : null;
         leadershipHeadingInput.value = leadSection?.label || 'Leadership Competencies';
         leadershipLevelInput.value = leadSection?.level || 'Basic';
@@ -989,7 +1408,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         selectedTemplateLayout.sections.lead.level = level;
         const savedVersion = leadershipLabelEditVersion;
         try {
-            const response = await fetch('sheets_api.php', {
+            const response = await fetch('template_api.php', {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
@@ -1040,14 +1459,15 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         const salaryGrade = salaryGradeSelect.value;
         competencyTemplateSelect.replaceChildren(new Option('-- Standard competencies --', ''));
         if (salaryGrade === '') return;
-        const response = await fetch('sheets_api.php?action=template_list&salary_grade=' + encodeURIComponent(salaryGrade), { credentials: 'same-origin' });
+        const manageTemplates = IS_ADMIN ? '&manage_templates=1' : '';
+        const response = await fetch('template_api.php?action=template_list&salary_grade=' + encodeURIComponent(salaryGrade) + manageTemplates, { credentials: 'same-origin' });
         const data = await response.json();
         if (!response.ok || data.status !== 'success') {
             throw new Error(data.message || 'Unable to load competency templates.');
         }
         if (salaryGradeSelect.value !== salaryGrade) return;
         if (data.templates.length === 0) {
-            templateLoadStatus.textContent = 'No shared sheets match your region, field, and both your profile and candidate salary grades. Check that the sheet is shared with raters and its grade range includes both grades.';
+            templateLoadStatus.textContent = 'No shared sheets match your region, field, and candidate salary grade. Check that the sheet is shared with raters and its grade range includes this grade.';
         } else {
             templateLoadStatus.textContent = '';
         }
@@ -1066,6 +1486,27 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 await selectCompetencyTemplate(requestedTemplateId);
             } else {
                 templateLoadStatus.textContent = 'This sheet is not available for the selected candidate salary grade. Choose a grade within the sheet range or select another sheet.';
+            }
+        } else if (document.getElementById('office_name').value === 'Regional Office') {
+            const position = currentPosition();
+            const exactPositionKey = compactPosition(position);
+            const basePositionKey = compactNoParens(position);
+            if (exactPositionKey !== '') {
+                const prefix = 'SG ' + salaryGrade + ' - ';
+                const matchingTemplate = data.templates.find(template => {
+                    const title = String(template.title || '');
+                    if (!title.startsWith(prefix)) return false;
+                    const templatePosition = title.slice(prefix.length);
+                    return compactPosition(templatePosition) === exactPositionKey;
+                }) || data.templates.find(template => {
+                    const title = String(template.title || '');
+                    if (!title.startsWith(prefix)) return false;
+                    return compactNoParens(title.slice(prefix.length)) === basePositionKey;
+                });
+                if (matchingTemplate) {
+                    competencyTemplateSelect.value = String(matchingTemplate.id);
+                    await selectCompetencyTemplate(String(matchingTemplate.id));
+                }
             }
         }
     }
@@ -1144,7 +1585,8 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         const salaryGrade = salaryGradeSelect.value;
         templateLoadStatus.textContent = 'Loading…';
         try {
-            const response = await fetch('sheets_api.php?template_id=' + encodeURIComponent(templateId) + '&salary_grade=' + encodeURIComponent(salaryGrade), { credentials: 'same-origin' });
+            const manageTemplates = IS_ADMIN ? '&manage_templates=1' : '';
+            const response = await fetch('template_api.php?template_id=' + encodeURIComponent(templateId) + '&salary_grade=' + encodeURIComponent(salaryGrade) + manageTemplates, { credentials: 'same-origin' });
             const data = await response.json();
             if (!response.ok || data.status !== 'success') {
                 throw new Error(data.message || 'Unable to load the selected template.');
@@ -1193,13 +1635,40 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             templateLoadStatus.textContent = error.message;
         });
     });
+    fetch('positions_api.php?action=list&scope=REGIONAL_OFFICE', { credentials: 'same-origin' })
+        .then(response => response.ok ? response.json() : null)
+        .then(data => {
+            if (!data || data.status !== 'success' || !Array.isArray(data.positions)) return;
+            data.positions.forEach(position => {
+                const fullKey = compactPosition(position.title);
+                const baseKey = compactNoParens(position.title);
+                const grade = Number(position.salary_grade);
+                if (fullKey && Number.isInteger(grade)) POSITION_SG_MAP[fullKey] = grade;
+                if (position.title) positionApiTitles.push(position.title);
+                if (position.leadership_level === 'B' || position.leadership_level === 'I') {
+                    if (fullKey && !(fullKey in LEADERSHIP_LEVEL_MAP)) LEADERSHIP_LEVEL_MAP[fullKey] = position.leadership_level;
+                    if (baseKey && !(baseKey in LEADERSHIP_LEVEL_MAP)) LEADERSHIP_LEVEL_MAP[baseKey] = position.leadership_level;
+                }
+            });
+            applyFormLayout();
+        })
+        .catch(() => {});
     document.getElementById('scoringForm').addEventListener('reset', () => {
         setTimeout(() => {
-            salaryGradeSelect.value = '';
+            if (IS_ADMIN) {
+                salaryGradeSelect.value = '';
+            } else {
+                salaryGradeSelect.value = <?php echo json_encode((int)($initialCandidateGrade ?? 0)); ?>;
+            }
             competencyTemplateSelect.value = '';
             competencyTemplateIdInput.value = '';
             templateLoadStatus.textContent = '';
             renderCustomCompetencies({ sections: {} });
+            if (!IS_ADMIN && salaryGradeSelect.value !== '') {
+                loadCompetencyTemplates().catch(error => {
+                    templateLoadStatus.textContent = error.message;
+                });
+            }
         }, 0);
     });
     document.getElementById('scoringForm').addEventListener('input', event => {

@@ -1,6 +1,7 @@
 <?php
 
 function ensure_sheets_schema(mysqli $conn): void {
+    if (!app_allow_ddl()) return;
     $conn->query("CREATE TABLE IF NOT EXISTS sheet_documents (
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         owner_id INT NOT NULL,

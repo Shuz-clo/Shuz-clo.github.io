@@ -12,7 +12,7 @@ require_admin();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interview Scoring Sheets</title>
+    <title>Competency Templates</title>
     <style>
         :root {
             color-scheme: light;
@@ -170,8 +170,9 @@ require_admin();
 </nav>
 
 <main id="homeView">
-    <h1>Interview Scoring Sheets</h1>
+    <h1>Competency Templates</h1>
     <p>Manage shared competency forms. For example, set Basic forms to grades 0–17 and Advanced forms to 18–25. New forms stay private until you make them available to raters.</p>
+    <p><a class="button primary" href="template_seed.php">Generate Regional Office Position Sheets</a></p>
     <div class="templates">
         <button class="tpl" type="button" id="tplNew">
             <div class="page"></div>
@@ -191,6 +192,7 @@ require_admin();
     <header class="bar">
         <button type="button" id="btnBack">&larr; Home</button>
         <input id="templateTitle" type="text" maxlength="120" placeholder="Template name (spaces allowed)" aria-label="Template name">
+        <button class="primary" type="button" id="saveTemplateBtn" disabled>Save Sheet</button>
         <button class="primary" type="button" id="useTemplateBtn" disabled>Use in rating form</button>
         <span class="save-status" id="saveStatus" data-state="">All changes saved</span>
     </header>
@@ -254,6 +256,7 @@ require_admin();
     let saveTimer = null;
     let isDirty = false;
     let savePromise = null;
+    let isNewTemplate = false;
 
     const tabs = document.getElementById('templateTabs');
     const titleInput = document.getElementById('templateTitle');
@@ -404,6 +407,7 @@ require_admin();
     function updateButtons() {
         const hasTemplate = !!currentTemplate;
         const hasSections = hasTemplate && Object.keys(currentTemplate.layout.sections).length > 0;
+        document.getElementById('saveTemplateBtn').disabled = !hasTemplate;
         document.getElementById('addEmptyRowBtn').disabled = !hasTemplate;
         document.getElementById('addCompetencyBtn').disabled = !hasSections;
         document.getElementById('useTemplateBtn').disabled = !hasTemplate || Number(currentTemplate.is_shared) !== 1;
@@ -546,7 +550,10 @@ require_admin();
     function renderTemplateList() {
         templateList.replaceChildren();
         const query = searchInput.value.trim().toLowerCase();
-        const visibleTemplates = templates.filter(template => template.title.toLowerCase().includes(query));
+        const visibleTemplates = templates
+            .filter(template => template.title.toLowerCase().includes(query))
+            .sort((a, b) => Number(b.min_salary_grade ?? -1) - Number(a.min_salary_grade ?? -1)
+                || a.title.localeCompare(b.title));
         if (!visibleTemplates.length) {
             const empty = document.createElement('div');
             empty.className = 'empty-list';
@@ -712,6 +719,7 @@ require_admin();
             templateSharedInput.checked = Number(currentTemplate.is_shared) === 1;
             activeSectionKey = Object.keys(currentTemplate.layout.sections)[0] || null;
             isDirty = false;
+            isNewTemplate = false;
             renderSections();
             renderSheetLabelFields();
             showEditor();
@@ -745,6 +753,7 @@ require_admin();
             };
             templates.unshift(template);
             currentTemplate = template;
+            isNewTemplate = true;
             titleInput.value = template.title;
             minSalaryGradeInput.value = template.min_salary_grade;
             maxSalaryGradeInput.value = template.max_salary_grade;
@@ -814,7 +823,23 @@ require_admin();
 
     async function useTemplate() {
         if (!currentTemplate || !await saveCurrentTemplate()) return;
-        window.location.href = 'index.php?template_id=' + encodeURIComponent(currentTemplate.id);
+        const salaryGrade = Number(currentTemplate.min_salary_grade);
+        const gradeParam = Number.isInteger(salaryGrade) && salaryGrade >= 0 && salaryGrade <= 25
+            ? '&salary_grade=' + encodeURIComponent(salaryGrade)
+            : '';
+        window.location.href = 'index.php?template_id=' + encodeURIComponent(currentTemplate.id) + gradeParam;
+    }
+
+    async function saveTemplateNow() {
+        clearTimeout(saveTimer);
+        if (!currentTemplate) return;
+        isDirty = true;
+        if (!await saveCurrentTemplate()) {
+            window.alert('The template could not be saved. Check the save status and try again.');
+            return;
+        }
+        window.alert(isNewTemplate ? 'New sheet saved successfully.' : 'Sheet saved successfully.');
+        isNewTemplate = false;
     }
 
     titleInput.addEventListener('input', () => {
@@ -889,6 +914,7 @@ require_admin();
     document.getElementById('addEmptyRowBtn').addEventListener('click', addEmptySection);
     document.getElementById('addCompetencyBtn').addEventListener('click', () => addCompetency(sectionSelect.value));
     document.getElementById('useTemplateBtn').addEventListener('click', useTemplate);
+    document.getElementById('saveTemplateBtn').addEventListener('click', saveTemplateNow);
     document.getElementById('deleteTemplateBtn').addEventListener('click', deleteTemplate);
     sectionSelect.addEventListener('change', () => {
         activeSectionKey = sectionSelect.value;

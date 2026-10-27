@@ -1,67 +1,68 @@
 <?php
 ob_start();
 
-require_once 'db.php';
+require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/AuthSchema.php';
-require_once 'auth.php';
-require_admin(true);
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/Audit.php';
 
-function json_out(array $payload, int $code = 200): void {
+require_admin(true);
+
+function delete_candidate_json(array $payload, int $status = 200): void {
     if (ob_get_length()) ob_clean();
-    http_response_code($code);
-    header('Content-Type: application/json');
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode($payload);
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    json_out(['status' => 'error', 'message' => 'Invalid request.'], 405);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    delete_candidate_json(['status' => 'error', 'message' => 'Invalid request.'], 405);
 }
-
 if (!verify_csrf($_POST['csrf_token'] ?? null)) {
-    json_out(['status' => 'error', 'message' => 'Your session expired. Please refresh the page.'], 403);
+    delete_candidate_json(['status' => 'error', 'message' => 'Your session expired. Please refresh the page and try again.'], 403);
 }
 
-$id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
-if ($id <= 0) {
-    json_out(['status' => 'error', 'message' => 'Invalid Candidate ID']);
+$candidateId = filter_var($_POST['id'] ?? '', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+if ($candidateId === false) {
+    delete_candidate_json(['status' => 'error', 'message' => 'Invalid applicant.'], 422);
 }
 
 try {
     ensure_schema($conn);
-
-    $stmtInfo = $conn->prepare("SELECT candidate_name, office_name, position_title FROM candidates WHERE id = ? LIMIT 1");
-    $stmtInfo->bind_param('i', $id);
-    $stmtInfo->execute();
-    $candInfo = $stmtInfo->get_result()->fetch_assoc();
-    $stmtInfo->close();
-
     $conn->begin_transaction();
 
-    $sc = $conn->prepare("DELETE FROM candidate_scores WHERE candidate_id = ?");
-    $sc->bind_param("i", $id);
-    $sc->execute();
-    $sc->close();
-
-    $stmt = $conn->prepare("DELETE FROM candidates WHERE id = ?");
-    $stmt->bind_param("i", $id);
+    $stmt = $conn->prepare('SELECT candidate_name, position_title, office_name, interview_date
+        FROM candidates WHERE id = ? FOR UPDATE');
+    $stmt->bind_param('i', $candidateId);
     $stmt->execute();
-    $deleted = $stmt->affected_rows;
+    $candidate = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$candidate) {
+        $conn->rollback();
+        delete_candidate_json(['status' => 'error', 'message' => 'That applicant no longer exists.'], 404);
+    }
+
+    $stmt = $conn->prepare('DELETE FROM candidate_scores WHERE candidate_id = ?');
+    $stmt->bind_param('i', $candidateId);
+    $stmt->execute();
+    $stmt->close();
+
+    $stmt = $conn->prepare('DELETE FROM candidates WHERE id = ?');
+    $stmt->bind_param('i', $candidateId);
+    $stmt->execute();
     $stmt->close();
 
     $conn->commit();
-
-    if ($deleted < 1) {
-        json_out(['status' => 'error', 'message' => 'That applicant was not found in the database (it may already be deleted). Refresh the page.']);
-    }
-
-    audit_log($conn, $id, 'delete', $candInfo ?: null, null);
-
-    json_out(['status' => 'success']);
-} catch (Exception $e) {
-    try { $conn->rollback(); } catch (Exception $ignored) {}
+    audit_log($conn, $candidateId, 'delete', $candidate, null);
+    delete_candidate_json(['status' => 'success']);
+} catch (Throwable $e) {
+    try { $conn->rollback(); } catch (Throwable $ignored) {}
     error_log('delete_candidate error: ' . $e->getMessage());
-    json_out(['status' => 'error', 'message' => DEBUG ? $e->getMessage() : 'Could not delete.'], 500);
+    delete_candidate_json([
+        'status' => 'error',
+        'message' => DEBUG ? $e->getMessage() : 'Could not delete the applicant.'
+    ], 500);
 }

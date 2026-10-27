@@ -1,6 +1,7 @@
 <?php
-function auth_ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
-    try {
+   function auth_ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
+       if (!app_allow_ddl()) return;
+       try {
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return;
         $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
         $stmt->bind_param('ss', $table, $column); $stmt->execute(); $exists = $stmt->get_result();
@@ -10,6 +11,7 @@ function auth_ensure_column(mysqli $conn, string $table, string $column, string 
 }
 
 function ensure_auth_schema(mysqli $conn): void {
+    if (!app_allow_ddl()) return;
     $conn->query("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(100) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','rater','user') NOT NULL DEFAULT 'user', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
     auth_ensure_column($conn, 'users', 'region', 'VARCHAR(100) NULL DEFAULT NULL');
     auth_ensure_column($conn, 'users', 'field_name', 'VARCHAR(100) NULL DEFAULT NULL');
@@ -65,9 +67,7 @@ function request_ip(): string {
 function client_ip(): string { return request_ip(); }
 
 function submission_rate_ok(mysqli $conn, int $limit = 500, int $windowMinutes = 60): bool {
-    static $tableReady = false;
     try {
-        if (!$tableReady) { $conn->query("CREATE TABLE IF NOT EXISTS submission_attempts (ip VARCHAR(45) PRIMARY KEY, `count` INT NOT NULL DEFAULT 0, window_start DATETIME NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4"); $tableReady = true; }
         $ip = request_ip(); $now = date('Y-m-d H:i:s'); $cut = date('Y-m-d H:i:s', time() - ($windowMinutes * 60));
         $stmt = $conn->prepare("INSERT INTO submission_attempts (ip, `count`, window_start) VALUES (?, 1, ?) ON DUPLICATE KEY UPDATE `count` = IF(window_start < ?, 1, `count` + 1), window_start = IF(window_start < ?, VALUES(window_start), window_start)");
         $stmt->bind_param('ssss', $ip, $now, $cut, $cut); $stmt->execute(); $stmt->close();
@@ -75,7 +75,6 @@ function submission_rate_ok(mysqli $conn, int $limit = 500, int $windowMinutes =
         return !$row || (int)$row['count'] <= $limit;
     } catch (Throwable $e) { error_log('submission_rate_ok failed: ' . $e->getMessage()); return true; }
 }
-
 function is_locked_out(mysqli $conn): ?int {
     $ip = client_ip(); $stmt = $conn->prepare("SELECT locked_until FROM login_attempts WHERE ip = ?"); $stmt->bind_param('s', $ip); $stmt->execute(); $row = $stmt->get_result()->fetch_assoc(); $stmt->close();
     if ($row && $row['locked_until'] && strtotime($row['locked_until']) > time()) return strtotime($row['locked_until']) - time(); return null;

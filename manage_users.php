@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/bootstrap.php';
 // ============================================================
 // manage_users.php — COMPLETE FIXED FILE
 //
@@ -18,13 +19,12 @@ require_once __DIR__ . '/Audit.php';
 require_once __DIR__ . '/AccessGroups.php';
 require_once __DIR__ . '/Raters.php';
 
-ensure_auth_schema($conn);
-ensure_schema($conn);
 require_role('admin');
 
 const MANAGE_ROLES = ['admin', 'rater', 'user'];
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 72;
+$salaryGrades = access_position_salary_grades($conn);
 
 function h($s): string {
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
@@ -145,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error', 'Please choose a valid role.');
             } elseif (!array_key_exists($region, ACCESS_REGIONS)
                 || !access_field_is_valid($fieldName)
-                || !access_salary_grade_is_valid($salaryGradeValue)) {
+                || !access_position_salary_grade_is_valid($conn, $salaryGradeValue, $salaryGrades)) {
                 flash('error', 'Please choose a valid region, field, and salary grade.');
             } elseif (($problem = password_problem($password)) !== null) {
                 flash('error', $problem);
@@ -172,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error', 'User not found.');
             } elseif (!array_key_exists($region, ACCESS_REGIONS)
                 || !access_field_is_valid($fieldName)
-                || !access_salary_grade_is_valid($salaryGradeValue)) {
+                || !access_position_salary_grade_is_valid($conn, $salaryGradeValue, $salaryGrades)) {
                 flash('error', 'Please choose a valid region, field, and salary grade.');
             } else {
                 $salaryGrade = (int)$salaryGradeValue;
@@ -388,6 +388,8 @@ $csrf = csrf_token();
         <h1>Manage Users</h1>
         <div class="nav no-print">
             <a href="results_2.php">&larr; Results</a>
+            <a href="audit_viewer.php">Score Audit</a>
+            <a href="bulk_users.php">Bulk Users</a>
             <a href="logout.php">Log out (<?php echo h($_SESSION['username'] ?? ''); ?>)</a>
         </div>
     </div>
@@ -442,19 +444,13 @@ $csrf = csrf_token();
             </div>
             <div class="f">
                 <label for="new_salary_grade">Salary grade</label>
-                <select id="new_salary_grade" name="salary_grade" required>
+                <select id="new_salary_grade" name="salary_grade" required <?php echo $salaryGrades ? '' : 'disabled'; ?>>
                     <option value="">-- Select salary grade --</option>
-                    <optgroup label="Basic (0-17)">
-                        <?php for ($grade = 0; $grade <= 17; $grade++): ?>
-                            <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
-                        <?php endfor; ?>
-                    </optgroup>
-                    <optgroup label="Advanced (18-25)">
-                        <?php for ($grade = 18; $grade <= 25; $grade++): ?>
-                            <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
-                        <?php endfor; ?>
-                    </optgroup>
+                    <?php foreach ($salaryGrades as $grade): ?>
+                        <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
+                    <?php endforeach; ?>
                 </select>
+                <?php if (!$salaryGrades): ?><span class="muted">No Regional Office salary grades exist. Seed or import positions first.</span><?php endif; ?>
             </div>
             <button type="submit">Create account</button>
         </form>
@@ -582,11 +578,11 @@ $csrf = csrf_token();
                                 <input type="text" name="field_other" maxlength="100" placeholder="Other field" aria-label="Other field for <?php echo h($u['username']); ?>"
                                        value="<?php echo !in_array($u['field_name'], ACCESS_FIELDS, true) ? h($u['field_name']) : ''; ?>"
                                        <?php echo ($u['field_name'] === 'Other' || !in_array($u['field_name'], ACCESS_FIELDS, true)) ? '' : 'hidden'; ?>>
-                                <select name="salary_grade" required aria-label="Salary grade for <?php echo h($u['username']); ?>">
+                                <select name="salary_grade" required aria-label="Salary grade for <?php echo h($u['username']); ?>" <?php echo $salaryGrades ? '' : 'disabled'; ?>>
                                     <option value="">-- Grade --</option>
-                                    <?php for ($grade = 0; $grade <= 25; $grade++): ?>
+                                    <?php foreach ($salaryGrades as $grade): ?>
                                         <option value="<?php echo $grade; ?>" <?php echo (string)$u['salary_grade'] === (string)$grade ? 'selected' : ''; ?>><?php echo $grade; ?></option>
-                                    <?php endfor; ?>
+                                    <?php endforeach; ?>
                                 </select>
                                 <button type="submit" class="small">Save</button>
                             </form>
