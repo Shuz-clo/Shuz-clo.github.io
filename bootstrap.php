@@ -29,6 +29,7 @@ ini_set('error_log', $appLogDir . DIRECTORY_SEPARATOR . 'php-errors.log');
 
 set_exception_handler(static function (Throwable $exception) use ($appDevMode): void {
     error_log((string)$exception);
+    error_log('[application exception] ' . (string)$exception, 4);
     http_response_code(500);
 
     if ($exception instanceof mysqli_sql_exception && (int)$exception->getCode() === 1146) {
