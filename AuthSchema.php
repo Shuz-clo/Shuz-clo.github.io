@@ -18,6 +18,19 @@ function ensure_auth_schema(mysqli $conn): void {
     auth_ensure_column($conn, 'users', 'salary_grade', 'TINYINT UNSIGNED NULL DEFAULT NULL');
     $conn->query("CREATE TABLE IF NOT EXISTS remember_tokens (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
     $conn->query("CREATE TABLE IF NOT EXISTS login_attempts (ip VARCHAR(45) PRIMARY KEY, attempts INT NOT NULL DEFAULT 0, locked_until DATETIME NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4");
+    $conn->query("CREATE TABLE IF NOT EXISTS password_reset_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL UNIQUE,
+        status ENUM('pending','approved','rejected','used','expired') NOT NULL DEFAULT 'pending',
+        token_hash CHAR(64) NULL,
+        requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        approved_at DATETIME NULL,
+        expires_at DATETIME NULL,
+        completed_at DATETIME NULL,
+        reviewed_by INT NULL,
+        INDEX idx_reset_status_requested (status, requested_at),
+        CONSTRAINT fk_password_reset_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 function find_user_by_username(mysqli $conn, string $username): ?array {

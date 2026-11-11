@@ -6,7 +6,6 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/competency_template_schema.php';
-require_once __DIR__ . '/Audit.php';
 
 require_admin(true);
 
@@ -118,12 +117,6 @@ try {
     }
 
     $conn->commit();
-    audit_log($conn, 0, 'delete', null, [
-        'section_id' => $sectionId,
-        'competency_id' => $competencyId,
-        'templates_changed' => $templatesChanged,
-        'candidate_records_changed' => $recordsChanged
-    ]);
     delete_competency_json([
         'status' => 'success',
         'templatesChanged' => $templatesChanged,

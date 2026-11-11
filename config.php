@@ -1,13 +1,8 @@
 <?php
 if (is_file(__DIR__ . '/config.local.php')) require __DIR__ . '/config.local.php';
 if (!function_exists('app_allow_ddl')) {
-    function app_allow_ddl(): bool {
-        return PHP_SAPI === 'cli' || getenv('APP_ALLOW_DDL') === '1';
-    }
+    function app_allow_ddl(): bool { return PHP_SAPI === 'cli'; }
 }
-$appEnv = getenv('APP_ENV');
-$__local = (($appEnv === false || $appEnv === 'local') && (getenv('DB_HOST') === false));
-// ...the rest of config.php stays the same...
 $appEnv = getenv('APP_ENV');
 $appEnv = getenv('APP_ENV');
 $__local = (($appEnv === false || $appEnv === 'local') && (getenv('DB_HOST') === false));

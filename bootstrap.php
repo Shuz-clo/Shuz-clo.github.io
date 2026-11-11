@@ -29,7 +29,6 @@ ini_set('error_log', $appLogDir . DIRECTORY_SEPARATOR . 'php-errors.log');
 
 set_exception_handler(static function (Throwable $exception) use ($appDevMode): void {
     error_log((string)$exception);
-    error_log('[application exception] ' . (string)$exception, 4);
     http_response_code(500);
 
     if ($exception instanceof mysqli_sql_exception && (int)$exception->getCode() === 1146) {
@@ -118,9 +117,9 @@ function app_require_tables(mysqli $conn, array $tables): void {
 if (!defined('APP_SKIP_SCHEMA_CHECK') || APP_SKIP_SCHEMA_CHECK !== true) {
     app_require_tables($conn, [
         'users', 'remember_tokens', 'login_attempts', 'submission_attempts',
-        'score_audit', 'candidates', 'candidate_scores', 'sheet_settings',
+        'candidates', 'candidate_scores', 'sheet_settings',
         'position_rater_order', 'removed_tabs', 'sheet_documents',
         'competency_templates', 'sheets', 'sheet_cells', 'evidence_options',
-        'positions', 'positions_seed_state_v2',
+        'positions', 'positions_seed_state_v2', 'password_reset_requests', 'form_drafts',
     ]);
 }

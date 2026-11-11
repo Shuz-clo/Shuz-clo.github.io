@@ -4,7 +4,6 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/AccessGroups.php';
-require_once __DIR__ . '/Audit.php';
 
 require_admin();
 
@@ -235,16 +234,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                             throw $exception;
                         }
-                        $newUserId = (int)$conn->insert_id;
-                        audit_log($conn, 0, 'role_change', null, [
-                            'user_id' => $newUserId,
-                            'username' => $username,
-                            'role' => $role,
-                            'region' => $region,
-                            'field_name' => $fieldName,
-                            'salary_grade' => $salaryGrade,
-                            'via' => 'bulk_users',
-                        ]);
                         $createdResults[] = ['username' => $username, 'password' => $password, 'status' => 'Created'];
                         unset($password, $passwordHash);
                     }
@@ -252,7 +241,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $transactionStarted = false;
                     $insertStmt->close();
                     $lookupStmt->close();
-                    $pageMessage = 'Valid accounts were processed. Save or download each generated password now; passwords are not retained after this response.';
+                    $createdCount = count(array_filter(
+                        $createdResults,
+                        static fn(array $result): bool => $result['status'] === 'Created'
+                    ));
+                    $pageMessage = $createdCount > 0
+                        ? "{$createdCount} account(s) were created directly and are ready to use; they do not need to sign up separately. Save or download each generated password now because passwords are not retained after this response."
+                        : 'No new accounts were created. Check each row status below.';
                 } catch (Throwable $exception) {
                     if ($transactionStarted) {
                         try { $conn->rollback(); } catch (Throwable $rollbackException) {
@@ -295,6 +290,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .notice.error { background: #fdecea; color: #7a1f16; }
         .notice.success { background: #e8f5e9; color: #14532d; }
         .table-scroll { overflow-x: auto; }
+        .bulk-confirm { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px; margin: 16px 0; border: 1px solid #a8d5b5; border-radius: 6px; background: #f0faf3; }
+        .bulk-confirm p { margin: 0; color: #14532d; }
+        .bulk-confirm button { min-height: 44px; font-weight: 700; }
+        .bulk-confirm button:disabled { background: #7b8580; cursor: not-allowed; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 9px; border-bottom: 1px solid #e4e8ed; text-align: left; vertical-align: top; }
         th { background: #f1f4f6; }
@@ -313,6 +312,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <section class="card">
             <h2>One-time account results</h2>
             <p>Copy or download generated passwords now. They are shown only in this response and are not saved in the database or session.</p>
+            <?php if (count(array_filter($createdResults, static fn(array $result): bool => $result['status'] === 'Created')) > 0): ?>
+                <p><a href="manage_users.php">Open Manage Users to verify the new accounts</a></p>
+            <?php endif; ?>
             <button type="button" id="downloadResults">Download CSV</button>
             <div class="table-scroll">
                 <table id="createdUsers">
@@ -348,6 +350,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <section class="card">
             <h2>Step 1: Review rows</h2>
             <p>Rows with errors will not be created. Duplicate usernames are flagged. Confirm creates only rows that pass validation at confirmation time.</p>
+            <?php
+            $validPreviewCount = count(array_filter($previewRows, static fn(array $row): bool => !$row['errors']));
+            $staged = $_SESSION['bulk_users_preview'] ?? null;
+            ?>
+            <?php if (is_array($staged) && isset($staged['id'])): ?>
+                <form method="post" class="bulk-confirm" id="confirmBulkUsersForm">
+                    <input type="hidden" name="csrf_token" value="<?php echo bulk_users_h($csrfToken); ?>">
+                    <input type="hidden" name="action" value="confirm">
+                    <input type="hidden" name="batch_id" value="<?php echo bulk_users_h($staged['id']); ?>">
+                    <p><strong><?php echo $validPreviewCount; ?></strong> valid account(s) will be created. You can review the rows below before confirming.</p>
+                    <button type="submit" <?php echo $validPreviewCount === 0 ? 'disabled' : ''; ?>>Confirm and create valid accounts</button>
+                </form>
+                <script>
+                    document.getElementById('confirmBulkUsersForm').addEventListener('submit', function (event) {
+                        if (!window.confirm('Create <?php echo $validPreviewCount; ?> valid user account(s) from this CSV?')) {
+                            event.preventDefault();
+                        }
+                    });
+                </script>
+            <?php endif; ?>
             <div class="table-scroll">
                 <table>
                     <thead><tr><th>CSV row</th><th>Username</th><th>Role</th><th>Salary grade</th><th>Region</th><th>Field</th><th>Validation</th></tr></thead>
@@ -368,21 +390,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </tbody>
                 </table>
             </div>
-            <?php $staged = $_SESSION['bulk_users_preview'] ?? null; ?>
-            <?php if (is_array($staged) && isset($staged['id'])): ?>
-                <form method="post" class="actions">
-                    <input type="hidden" name="csrf_token" value="<?php echo bulk_users_h($csrfToken); ?>">
-                    <input type="hidden" name="action" value="confirm">
-                    <input type="hidden" name="batch_id" value="<?php echo bulk_users_h($staged['id']); ?>">
-                    <button type="submit">Step 2: Create valid accounts</button>
-                </form>
-            <?php endif; ?>
         </section>
     <?php endif; ?>
 
     <section class="card">
         <h2>Upload or paste a CSV</h2>
-        <p>Required columns: <code>username,role,salary_grade,region,field_name</code>. Roles follow registration rules (rater or user), region must be Region VI, and salary grades must exist in Regional Office positions. Maximum 500 rows and 1 MB.</p>
+        <p>Required columns: <code>username,role,salary_grade,region,field_name</code>. Roles follow registration rules (rater or user), region must be Region VI, and salary grades must exist in Regional Office positions. Maximum 500 rows and 1 MB. Click Create users to review the rows, then confirm before accounts are created.</p>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?php echo bulk_users_h($csrfToken); ?>">
             <input type="hidden" name="action" value="preview">
@@ -390,7 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="file" id="csv_file" name="csv_file" accept=".csv,text/csv">
             <label for="csv_text">Or paste CSV text</label>
             <textarea id="csv_text" name="csv_text" placeholder="username,role,salary_grade,region,field_name&#10;Jane Doe,rater,18,Region VI,Forestry"></textarea>
-            <button type="submit">Preview CSV</button>
+            <button type="submit">Create users</button>
         </form>
     </section>
 </main>

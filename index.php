@@ -26,6 +26,10 @@ $selectedPositionTitle = trim((string)($_GET['position_title'] ?? ''));
 if (mb_strlen($selectedPositionTitle) > 255) {
     $selectedPositionTitle = '';
 }
+$positionLookupTitle = $selectedPositionTitle;
+if (preg_match('/^(.*?) \[RO: [^\]]+\]$/', $selectedPositionTitle, $roPositionMatch)) {
+    $positionLookupTitle = trim($roPositionMatch[1]);
+}
 
 function show_position_access_error(string $title, string $message, ?int $salaryGrade = null): void {
     http_response_code(403);
@@ -40,6 +44,7 @@ function show_position_access_error(string $title, string $message, ?int $salary
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>' . $safeTitle . '</title>
+    <link rel="stylesheet" href="ui-enhancements.css">
     <style>
         * { box-sizing: border-box; }
         body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; background: #f3f6f4; color: #202124; font-family: Arial, Helvetica, sans-serif; }
@@ -79,31 +84,24 @@ if (isset($_GET['salary_grade'])) {
     }
 }
 
-if (current_role() === 'admin' && !isset($_GET['template_id'])) {
-    header('Location: results_2.php');
-    exit;
-}
-if (current_role() === 'rater' && !isset($_GET['template_id'])) {
-    header('Location: sheet_picker.php');
-    exit;
-}
-
 if (current_role() !== 'admin') {
     require_role(['rater']);
 }
 
+$initialTemplateId = 0;
 if (current_role() === 'rater') {
     $profileGrade = $scoringProfile['salary_grade'] ?? null;
     $requestedGrade = filter_var($_GET['salary_grade'] ?? null, FILTER_VALIDATE_INT);
     $templateId = filter_var($_GET['template_id'] ?? null, FILTER_VALIDATE_INT);
+    $hasPositionParameters = isset($_GET['template_id']) || isset($_GET['salary_grade']) || isset($_GET['position_title']);
     if (!access_salary_grade_is_valid($profileGrade)
         || !array_key_exists((string)($scoringProfile['region'] ?? ''), ACCESS_REGIONS)
         || !access_field_is_valid($scoringProfile['field_name'] ?? null)
-        || $requestedGrade === false
-        || $requestedGrade !== (int)$profileGrade
-        || $selectedPositionTitle === ''
-        || $templateId === false
-        || $templateId < 1) {
+        || ($hasPositionParameters && (
+            $requestedGrade === false
+            || $requestedGrade !== (int)$profileGrade
+            || $selectedPositionTitle === ''
+        ))) {
         show_position_access_error(
             'Position unavailable',
             'This link is missing valid position details or does not match the salary grade assigned to your account.',
@@ -112,45 +110,52 @@ if (current_role() === 'rater') {
     }
 
     $scope = 'REGIONAL_OFFICE';
-    $positionStmt = $conn->prepare('SELECT 1 FROM positions WHERE office_scope = ? AND title = ? AND salary_grade = ? LIMIT 1');
-    $positionStmt->bind_param('ssi', $scope, $selectedPositionTitle, $requestedGrade);
-    $positionStmt->execute();
-    $positionIsAllowed = $positionStmt->get_result()->num_rows > 0;
-    $positionStmt->close();
-    if (!$positionIsAllowed) {
-        show_position_access_error(
-            'Position unavailable',
-            'You can only open positions at the salary grade assigned to your account.',
-            (int)$profileGrade
-        );
+    if ($hasPositionParameters) {
+        $positionStmt = $conn->prepare('SELECT 1 FROM positions WHERE office_scope = ? AND title = ? AND salary_grade = ? LIMIT 1');
+        $positionStmt->bind_param('ssi', $scope, $positionLookupTitle, $requestedGrade);
+        $positionStmt->execute();
+        $positionIsAllowed = $positionStmt->get_result()->num_rows > 0;
+        $positionStmt->close();
+        if (!$positionIsAllowed) {
+            show_position_access_error(
+                'Position unavailable',
+                'You can only open positions at the salary grade assigned to your account.',
+                (int)$profileGrade
+            );
+        }
     }
 
     require_once __DIR__ . '/competency_template_schema.php';
     ensure_competency_template_schema($conn);
-    $templateTitle = 'SG ' . $requestedGrade . ' - ' . $selectedPositionTitle;
-    $region = (string)$scoringProfile['region'];
-    $fieldName = (string)$scoringProfile['field_name'];
-    $templateStmt = $conn->prepare('SELECT 1 FROM competency_templates
-        WHERE id = ? AND title = ? AND is_shared = 1
-            AND min_salary_grade <= ? AND max_salary_grade >= ?
-            AND (region IS NULL OR region = ?)
-            AND (field_name IS NULL OR field_name = ?)
-        LIMIT 1');
-    $templateStmt->bind_param('isiiss', $templateId, $templateTitle, $requestedGrade, $requestedGrade, $region, $fieldName);
-    $templateStmt->execute();
-    $templateIsAllowed = $templateStmt->get_result()->num_rows > 0;
-    $templateStmt->close();
-    if (!$templateIsAllowed) {
-        show_position_access_error(
-            'Scoring form unavailable',
-            'A shared scoring form for this position and salary grade could not be found. Please choose another position or ask an administrator to share its form.',
-            (int)$profileGrade
-        );
+    if ($hasPositionParameters && $templateId !== false && $templateId > 0) {
+        $templateTitle = 'SG ' . $requestedGrade . ' - ' . $selectedPositionTitle;
+        $region = (string)$scoringProfile['region'];
+        $fieldName = (string)$scoringProfile['field_name'];
+        $templateStmt = $conn->prepare('SELECT 1 FROM competency_templates
+            WHERE id = ? AND (title = ? OR title LIKE CONCAT(?, \' [RO:%\')) AND is_shared = 1
+                AND min_salary_grade <= ? AND max_salary_grade >= ?
+                AND (region IS NULL OR region = ?)
+                AND (field_name IS NULL OR field_name = ?)
+            LIMIT 1');
+        $templateStmt->bind_param('issiiss', $templateId, $templateTitle, $templateTitle, $requestedGrade, $requestedGrade, $region, $fieldName);
+        $templateStmt->execute();
+        $templateIsAllowed = $templateStmt->get_result()->num_rows > 0;
+        $templateStmt->close();
+        if ($templateIsAllowed) $initialTemplateId = $templateId;
     }
     $initialCandidateGrade = (int)$profileGrade;
 }
 
 $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
+$availableRaterRoles = rater_list();
+$basicLeadershipRows = leadership_rows_for_level('B');
+$advancedLeadershipRows = leadership_rows_for_level('I');
+$leadershipPositionLevels = array_map(
+    static fn(string $title, string $level): array => [$title, $level],
+    array_keys(leadership_level_titles()),
+    array_values(leadership_level_titles())
+);
+$leadershipAliases = leadership_level_aliases();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -159,7 +164,6 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="chrome" content="nofill">
     <title>DENR Interview Scoring Sheet</title>
-    <link rel="stylesheet" href="style.css">
     <style>
         body {
             font-family: Arial, Helvetica, sans-serif;
@@ -207,6 +211,11 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             padding: 20px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
+
+        .template-controls { max-width: 960px; margin: 0 auto 12px; padding: 12px 16px; background: #fff; border: 1px solid #d5dce2; }
+        .template-controls label { display: inline-flex; align-items: center; gap: 8px; margin-right: 18px; }
+        .template-controls input, .template-controls select { width: auto; min-width: 220px; padding: 6px 8px; border: 1px solid #aeb8c2; background: #fff; }
+        #noScoringFormMessage { max-width: 960px; margin: 0 auto 12px; padding: 12px 16px; border: 1px solid #e1c47a; background: #fff6e0; color: #684f0c; }
 
         table {
             width: 100%;
@@ -276,19 +285,120 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         #positionDropdown .pd-item:hover,
         #positionDropdown .pd-item.active { background: #107c41; color: #fff; }
         #positionDropdown .pd-empty { padding: 6px 8px; font-size: 12px; color: #777; font-style: italic; }
+        .rater-dropdown { position: relative; display: inline-block; width: min(100%, 360px); vertical-align: middle; }
+        #raterSummary { cursor: pointer; border-bottom: 1px solid #000; padding: 4px; list-style: none; }
+        #raterSummary::-webkit-details-marker { display: none; }
+        .rater-options {
+            position: absolute;
+            left: 0;
+            top: 100%;
+            z-index: 20;
+            min-width: 100%;
+            max-height: 260px;
+            overflow-y: auto;
+            padding: 8px 12px;
+            border: 1px solid #999;
+            background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .rater-options label { display: block; margin-bottom: 6px; white-space: nowrap; }
+        .rater-position-note { display: block; margin-top: 3px; color: #555; }
         @media print { #positionDropdown { display: none !important; } }
 
         @media print {
             .btn-container, #positionBackBtn, .rate-warn, .template-selection-row { display: none !important; }
+            body #templateControls { display: none !important; visibility: hidden !important; height: 0 !important; }
             #templateLoadStatus { display: none !important; }
             #raterDropdown > div { display: none !important; }
-            #raterSummary::-webkit-details-marker { display: none; }
             #raterSummary { border-bottom: none !important; padding: 0 !important; }
             select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: none; border: none; }
-            input[type="text"]::placeholder { color: transparent; }
+            input[type="text"]::placeholder,
+            input[type="number"]::placeholder { color: transparent; }
         }
 
         .btn-container { margin-top: 20px; text-align: center; }
+        .pdf-status { margin: 12px auto 0; max-width: 700px; color: #7a1f16; }
+        .pdf-status[hidden] { display: none !important; }
+        .pdf-status button { min-height: 48px; margin: 6px; }
+        .pdf-status-actions { display: flex; justify-content: center; flex-wrap: wrap; }
+
+        .pdf-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: grid;
+            place-items: center;
+            padding: 16px;
+            background: rgba(0, 0, 0, .48);
+        }
+        .pdf-modal-backdrop[hidden] { display: none !important; }
+        .pdf-modal-backdrop { z-index: 1000; }
+        .confirm-modal-backdrop { z-index: 1010; }
+        .pdf-modal {
+            width: min(100%, 440px);
+            padding: 24px;
+            border-radius: 12px;
+            background: #fff;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, .25);
+            color: #202124;
+        }
+        .pdf-modal h2 { margin: 0 0 12px; font-size: 22px; }
+        .pdf-modal p { margin: 0; line-height: 1.5; }
+        .pdf-modal-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
+        .pdf-modal-actions button { min-height: 48px; margin: 0; border-radius: 7px; }
+        .pdf-modal-primary { border: 0; background: #107c41; color: #fff; }
+        .pdf-modal-primary:hover:not(:disabled) { background: #0b6634; }
+        .pdf-modal-secondary { border: 1px solid #d5ddd7; background: #fff; color: #344139; }
+        @media (max-width: 520px) {
+            .pdf-modal-backdrop { padding: 0; place-items: end stretch; }
+            .pdf-modal { width: 100%; padding: 24px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; }
+            .pdf-modal-actions button { width: 100%; }
+        }
+        @media print {
+            .no-print, .pdf-modal-backdrop, .pdf-status { display: none !important; }
+        }
+
+        .pdf-render-root {
+            position: fixed !important;
+            top: 0 !important;
+            left: -10000px !important;
+            z-index: -1 !important;
+            width: 1100px !important;
+            max-width: none !important;
+            pointer-events: none !important;
+        }
+        .pdf-render-root form {
+            width: 1100px !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            box-shadow: none !important;
+        }
+        .pdf-render-root table,
+        .pdf-render-root tbody,
+        .pdf-render-root tr {
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
+        .pdf-field {
+            min-height: 1em;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            vertical-align: middle;
+        }
+        .pdf-field-multiline {
+            display: block !important;
+            min-height: 1em;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
 
         .form-toolbar {
             display: flex;
@@ -325,6 +435,17 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         .form-toolbar button:disabled { cursor: not-allowed; opacity: .48; }
         .form-toolbar .reset-button { color: #8d3a32; }
         .form-toolbar .reset-button:hover { border-color: #c8736b; background: #fff7f6; color: #8d3a32; }
+        #draftSaveStatus { color: #52635a; font-size: 12px; }
+        #draftUnavailableNotice { margin: 0 auto 12px; max-width: 960px; padding: 14px; border: 1px solid #e4c981; border-radius: 6px; background: #fff8e6; color: #654d0c; }
+        #draftUnavailableNotice button { min-height: 48px; margin: 10px 0 0; }
+        .resume-modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 16px; background: rgba(0,0,0,.48); }
+        .resume-modal-backdrop[hidden] { display: none !important; }
+        .resume-modal { width: min(100%, 440px); padding: 24px; border-radius: 12px; background: #fff; box-shadow: 0 16px 48px rgba(0,0,0,.25); color: #202124; }
+        .resume-modal h2 { margin: 0 0 12px; font-size: 22px; }
+        .resume-modal p { margin: 0; line-height: 1.5; }
+        .resume-modal-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+        .resume-modal-actions button { min-height: 48px; margin: 0; }
+        @media (max-width: 520px) { .resume-modal-backdrop { padding: 0; place-items: end stretch; } .resume-modal { width: 100%; padding: 24px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; } }
         @media (max-width: 520px) {
             .form-toolbar { align-items: stretch; flex-direction: column; }
             .form-toolbar-group { justify-content: space-between; }
@@ -341,6 +462,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         }
         tr.is-hidden { display: none; }
     </style>
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
 </head>
 <body>
 
@@ -363,11 +485,18 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 </div>
 <?php endif; ?>
 
+<div id="draftUnavailableNotice" role="status" aria-live="polite" hidden>
+    <strong>This form is no longer available.</strong>
+    <div>The shared template was removed or is no longer available for your position and account.</div>
+    <button type="button" id="discardUnavailableDraftBtn">Discard draft</button>
+</div>
+
 <form id="scoringForm" action="submit_score.php" method="POST" autocomplete="off">
 <input type="text" name="<?php echo HONEYPOT_FIELD; ?>" tabindex="-1" autocomplete="new-password" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px;">
 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
 <input type="hidden" name="custom_competencies_json" id="customCompetenciesJson" value="[]">
-<input type="hidden" name="competency_template_id" id="competencyTemplateId" value="">
+<input type="hidden" name="competency_template_id" id="competencyTemplateId" value="<?php echo (int)$initialTemplateId; ?>">
+<div id="draftSaveStatus" role="status" aria-live="polite" style="margin:0 0 8px;color:#52635a;font-size:12px;"></div>
 <?php if (current_role() === 'rater'): ?>
 <input type="hidden" name="salary_grade" id="salaryGrade" value="<?php echo (int)$initialCandidateGrade; ?>">
 <div class="form-toolbar">
@@ -379,7 +508,27 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 </div>
 <?php endif; ?>
 
-<table>
+<div id="noScoringFormMessage" role="status" aria-live="polite" hidden>No scoring form is available for this position. Ask an administrator to generate it.</div>
+<div id="templateControls" class="template-controls">
+    <?php if (current_role() === 'admin'): ?>
+    <label for="salaryGrade"><span data-sheet-label="candidate_salary_grade">Candidate salary grade:</span>
+        <input type="number" name="salary_grade" id="salaryGrade" required min="0" max="26" step="1" inputmode="numeric"
+               value="<?php echo $initialCandidateGrade === null ? '' : $initialCandidateGrade; ?>" placeholder="Enter salary grade (0-26)">
+    </label>
+    <?php endif; ?>
+    <?php if (current_role() === 'admin'): ?>
+    <label for="competencyTemplate"><span data-sheet-label="competency_template">Competency template:</span>
+        <select id="competencyTemplate">
+            <option value="">-- Select a designated form --</option>
+        </select>
+    </label>
+    <?php else: ?>
+    <select id="competencyTemplate" hidden aria-hidden="true" tabindex="-1"></select>
+    <?php endif; ?>
+    <span id="templateLoadStatus" role="status" aria-live="polite"></span>
+</div>
+
+<table id="scoringTable" hidden>
     <colgroup>
         <col class="col-desc">
         <col class="col-ev">
@@ -425,29 +574,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         <td class="info-cell"></td>
         <td colspan="2" class="info-cell" style="padding-bottom: 15px;"><span data-sheet-label="interview_date">Date:</span> <input type="text" name="interview_date" value="<?php echo date('F d, Y'); ?>" autocomplete="off" style="width: 70%; display: inline-block;"></td>
     </tr>
-    <?php if (current_role() === 'admin'): ?>
-    <tr class="template-selection-row">
-        <td class="info-cell"><span data-sheet-label="candidate_salary_grade">Candidate salary grade:</span></td>
-        <td colspan="2" class="info-cell">
-            <input type="number" name="salary_grade" id="salaryGrade" required
-                   min="0" max="26" step="1" inputmode="numeric"
-                   value="<?php echo $initialCandidateGrade === null ? '' : $initialCandidateGrade; ?>"
-                   placeholder="Enter salary grade (0-26)" style="width: 70%; display: inline-block;">
-        </td>
-    </tr>
-    <?php endif; ?>
-    <tr class="template-selection-row">
-        <td class="info-cell"><span data-sheet-label="competency_template">Competency template:</span></td>
-        <td colspan="2" class="info-cell">
-            <select id="competencyTemplate" style="width: 70%; display: inline-block;">
-                <option value="">-- Standard competencies --</option>
-            </select>
-            <span id="templateLoadStatus" role="status" style="font-size:12px;"></span>
-        </td>
-    </tr>
     <tr class="sec-core" id="sectionHeader_core">
         <th class="sec-header" id="coreHeadingText">Core Competencies</th>
-        <th class="sec-header" id="coreLevelLabel">Evidence</th>
+        <th class="sec-header" id="coreLevelLabel"></th>
         <th class="sec-header" id="coreRatingLabel">Rating</th>
     </tr>
 
@@ -488,7 +617,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     <tr class="sec-right" id="sectionHeader_org">
         <th class="sec-header" id="orgHeadingText">Organizational Competencies</th>
-        <th class="sec-header" id="orgLevelLabel">Advanced</th>
+        <th class="sec-header" id="orgLevelLabel"></th>
         <th class="sec-header" id="orgRatingLabel"></th>
     </tr>
 
@@ -528,49 +657,23 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     </tr>
 
     <tr class="leadership-row sec-right" id="sectionHeader_lead">
-        <th class="sec-header"><input type="text" id="lcHeadingText" value="Leadership Competencies" aria-label="Leadership section heading" maxlength="255" disabled><span id="lcHint" style="display:none; font-size:11px; font-weight:normal; opacity:0.85;"></span></th>
-        <th class="sec-header"><input type="text" id="lcLevelLabel" value="Basic" aria-label="Leadership level label" maxlength="100" disabled></th>
+        <th class="sec-header"><input type="text" id="lcHeadingText" name="lc_heading" value="Leadership Competencies" aria-label="Leadership section heading" maxlength="255" disabled><span id="lcHint" style="display:none; font-size:11px; font-weight:normal; opacity:0.85;"></span></th>
+        <th class="sec-header"><input type="text" id="lcLevelLabel" name="lc_level" value="" aria-label="Leadership level label" maxlength="100" disabled></th>
         <th class="sec-header"></th>
     </tr>
 
-    <tr class="leadership-row sec-right"><td class="comp-title">LC1 – STRATEGIC LEADERSHIP (THINKING STRATEGICALLY AND CREATIVELY)</td><td></td><td></td></tr>
+    <?php foreach ($basicLeadershipRows as $index => $row): $rowNumber = $index + 1; ?>
+    <tr class="leadership-row sec-right"><td class="comp-title"><?php echo htmlspecialchars($row['title'], ENT_QUOTES, 'UTF-8'); ?></td><td></td><td></td></tr>
     <tr class="leadership-row sec-right">
-        <td id="lcDesc1">Develops office/ service’s strategies and plans based on the DENR’s mission/vision</td>
-        <td><input type="text" name="evidence_lc1" autocomplete="off"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc1" placeholder="0.00" autocomplete="off"></td>
+        <td id="lcDesc<?php echo $rowNumber; ?>"><?php echo htmlspecialchars($row['desc'], ENT_QUOTES, 'UTF-8'); ?></td>
+        <td><input type="text" name="evidence_lc<?php echo $rowNumber; ?>" autocomplete="off"></td>
+        <td><input type="number" step="0.01" min="0" max="10" name="lc<?php echo $rowNumber; ?>" placeholder="0.00" autocomplete="off"></td>
     </tr>
-
-    <tr class="leadership-row sec-right"><td class="comp-title">LC2 – LEADING CHANGE</td><td></td><td></td></tr>
-    <tr class="leadership-row sec-right">
-        <td id="lcDesc2">Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation</td>
-        <td><input type="text" name="evidence_lc2" autocomplete="off"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc2" placeholder="0.00" autocomplete="off"></td>
-    </tr>
-
-    <tr class="leadership-row sec-right"><td class="comp-title">LC3 – PEOPLE DEVELOPMENT (CREATING AND NURTURING A HIGH PERFORMING ORGANIZATION)</td><td></td><td></td></tr>
-    <tr class="leadership-row sec-right">
-        <td id="lcDesc3">Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals</td>
-        <td><input type="text" name="evidence_lc3" autocomplete="off"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc3" placeholder="0.00" autocomplete="off"></td>
-    </tr>
-
-    <tr class="leadership-row sec-right"><td class="comp-title">LC4 – PEOPLE PERFORMANCE MANAGEMENT (MANAGING PERFORMANCE AND COACHING FOR RESULTS)</td><td></td><td></td></tr>
-    <tr class="leadership-row sec-right">
-        <td id="lcDesc4">Leads in project management activities</td>
-        <td><input type="text" name="evidence_lc4" autocomplete="off"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc4" placeholder="0.00" autocomplete="off"></td>
-    </tr>
-
-    <tr class="leadership-row sec-right"><td class="comp-title">LC5 – PARTNERSHIP AND NETWORKING (BUILDING COLLABORATIVE AND INCLUSIVE WORKING RELATIONSHIPS)</td><td></td><td></td></tr>
-    <tr class="leadership-row sec-right">
-        <td id="lcDesc5">Leads the practice of CSW in his/her office/unit</td>
-        <td><input type="text" name="evidence_lc5" autocomplete="off"></td>
-        <td><input type="number" step="0.01" min="0" max="10" name="lc5" placeholder="0.00" autocomplete="off"></td>
-    </tr>
+    <?php endforeach; ?>
 
     <tr class="sec-right" id="sectionHeader_func">
         <th class="sec-header" id="funcHeadingText">Functional Competencies</th>
-        <th class="sec-header" id="funcLevelLabel">Advanced</th>
+        <th class="sec-header" id="funcLevelLabel"></th>
         <th class="sec-header" id="funcRatingLabel"></th>
     </tr>
 
@@ -606,40 +709,618 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     <tr>
         <td class="transparent"><span data-sheet-label="rated_by">Rated by:</span> <input type="text" name="rater_name" placeholder="Rater Name" autocomplete="off" style="width: 70%; display: inline-block;"></td>
-        <td class="transparent" colspan="2"><span data-sheet-label="raters">Raters:</span>
-            <details id="raterDropdown" style="position: relative; display: inline-block; width: 60%; vertical-align: middle;">
-                <summary id="raterSummary" style="cursor: pointer; border-bottom: 1px solid #000; padding: 4px; list-style: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-- Select Raters --</summary>
-                <input type="hidden" name="raters_order" id="ratersOrder" value="">
-                <div style="position: absolute; left: 0; top: 100%; z-index: 20; background: #fff; border: 1px solid #999; box-shadow: 0 2px 6px rgba(0,0,0,0.2); padding: 6px 12px; min-width: 200px;">
-<?php foreach (rater_list() as $raterLabel): ?>
-    <label style="display: block; margin-bottom: 4px; white-space: nowrap;">
-        <input type="checkbox" class="rater-check" name="raters[]" value="<?php echo htmlspecialchars($raterLabel); ?>" data-label="<?php echo htmlspecialchars($raterLabel); ?>">
-        <?php echo htmlspecialchars($raterLabel); ?>
-    </label>
-<?php endforeach; ?>
-                    <a href="#" onclick="toggleAllRaters(); return false;" style="font-size: 12px; display: inline-block; margin-top: 4px;">Select all / none</a>
-                </div>
-            </details>
+        <td class="transparent" colspan="2"><span data-sheet-label="raters">Rater position:</span>
+            <input type="hidden" name="raters_order" id="ratersOrder" value="">
+            <div id="raterPositionControl">
+                <details id="raterDropdown" class="rater-dropdown">
+                    <summary id="raterSummary" data-empty="1">-- Select Rater Position --</summary>
+                    <div class="rater-options">
+                        <?php foreach ($availableRaterRoles as $raterLabel): ?>
+                            <label>
+                                <input type="radio" class="rater-choice" name="raters[]" value="<?php echo htmlspecialchars($raterLabel, ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars($raterLabel, ENT_QUOTES, 'UTF-8'); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </details>
+            </div>
         </td>
     </tr>
 </table>
 
 <div class="btn-container">
     <?php if ($canSubmit): ?>
-        <button type="button" id="saveBtn" onclick="saveOnly()">Save</button>
+        <button type="button" id="saveBtn" onclick="saveOnly()" disabled>Save</button>
     <?php endif; ?>
-    <button type="button" onclick="window.print()">Print / Save as PDF</button>
-    <button type="button" id="newSheetBtn" onclick="newSheet()" style="display: none;">New Sheet</button>
+        <button type="button" id="savePdfBtn" class="no-print">Save as PDF</button>
+        <button type="button" id="printBtn" onclick="window.print()">Print</button>
+        <button type="button" id="newSheetBtn" onclick="newSheet()" style="display: none;">New Sheet</button>
+        <div id="pdfStatus" class="pdf-status no-print" role="status" aria-live="polite" hidden>
+            <span class="pdf-status-message"></span>
+            <div class="pdf-status-actions">
+                <button type="button" data-pdf-action="retry">Retry</button>
+                <button type="button" data-pdf-action="share" hidden>Share / Open PDF</button>
+                <button type="button" data-pdf-action="print">Print</button>
+            </div>
+        </div>
 </div>
 </form>
+
+<div id="resumeDraftModal" class="resume-modal-backdrop no-print" hidden>
+    <section class="resume-modal" role="dialog" aria-modal="true" aria-labelledby="resumeDraftTitle" aria-describedby="resumeDraftDescription">
+        <h2 id="resumeDraftTitle">Continue your unfinished form?</h2>
+        <p id="resumeDraftDescription"></p>
+        <div class="resume-modal-actions">
+            <button type="button" id="continueDraftBtn" class="pdf-modal-primary">Continue editing</button>
+            <button type="button" id="discardDraftBtn" class="pdf-modal-secondary">Discard</button>
+            <button type="button" id="notNowDraftBtn" class="pdf-modal-secondary">Not now</button>
+        </div>
+    </section>
+</div>
+
+<div id="savedPdfModal" class="pdf-modal-backdrop no-print" hidden>
+        <section class="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="savedPdfTitle" aria-describedby="savedPdfDescription">
+            <h2 id="savedPdfTitle">Saved</h2>
+            <p id="savedPdfDescription">Your scores were saved. Save a PDF copy of this form now, in case you need it later?</p>
+            <div id="modalPdfStatus" class="pdf-status" role="status" aria-live="polite" hidden>
+                <span class="pdf-status-message"></span>
+                <div class="pdf-status-actions">
+                    <button type="button" data-pdf-action="retry">Retry</button>
+                    <button type="button" data-pdf-action="share" hidden>Share / Open PDF</button>
+                    <button type="button" data-pdf-action="print">Print</button>
+                </div>
+            </div>
+            <div class="pdf-modal-actions">
+                <button type="button" id="modalSavePdfBtn" class="pdf-modal-primary">Save as PDF</button>
+                <button type="button" id="modalClosePdfBtn" class="pdf-modal-secondary">Not now</button>
+            </div>
+        </section>
+</div>
+
+<div id="savedPdfConfirmModal" class="pdf-modal-backdrop confirm-modal-backdrop no-print" hidden>
+    <section class="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="savedPdfConfirmTitle" aria-describedby="savedPdfConfirmDescription">
+        <h2 id="savedPdfConfirmTitle">Are you sure?</h2>
+        <p id="savedPdfConfirmDescription">If you skip, you won't get a PDF copy of this form unless you print it yourself later.</p>
+        <div class="pdf-modal-actions">
+            <button type="button" id="pdfConfirmSaveBtn" class="pdf-modal-primary">No, save PDF</button>
+            <button type="button" id="pdfConfirmSkipBtn" class="pdf-modal-secondary">Yes, skip</button>
+        </div>
+    </section>
+</div>
 
 <script>
     const CAN_SUBMIT = <?php echo $canSubmit ? 'true' : 'false'; ?>;
     const IS_ADMIN = <?php echo current_role() === 'admin' ? 'true' : 'false'; ?>;
-    const BASIC_MAX_SG = <?php echo json_encode(BASIC_MAX_SG); ?>;
-    const BASIC_CORE_DESCRIPTIONS = <?php echo json_encode(basic_core_competency_descriptions(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
-    const BASIC_ORG_DESCRIPTIONS = <?php echo json_encode(basic_org_competency_descriptions(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    const CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;
+    const OPENED_WITHOUT_POSITION = <?php echo !isset($_GET['template_id']) && !isset($_GET['position_title']) && !isset($_GET['salary_grade']) ? 'true' : 'false'; ?>;
+    const BASIC_MAX_SG = <?php echo BASIC_MAX_SG; ?>;
+    const templateControls = document.getElementById('templateControls');
+    window.addEventListener('beforeprint', () => { templateControls.hidden = true; });
+    window.addEventListener('afterprint', () => { templateControls.hidden = false; });
 
+    const savedPdfModal = document.getElementById('savedPdfModal');
+    const savedPdfConfirmModal = document.getElementById('savedPdfConfirmModal');
+    const savePdfButtons = [document.getElementById('savePdfBtn'), document.getElementById('modalSavePdfBtn')];
+    const pdfStatuses = [document.getElementById('pdfStatus'), document.getElementById('modalPdfStatus')];
+    let pdfBusy = false;
+    let scoringSaveBusy = false;
+    let pdfReminderSkipped = false;
+    let pdfFile = null;
+    let pdfFileName = '';
+    let pdfBlob = null;
+    let pdfBlobUrl = null;
+    let pdfBlobUrlTimer = null;
+    let pdfDataTimer = null;
+    let html2canvasPromise = null;
+    let jsPdfPromise = null;
+    let pdfStatusMode = '';
+    let pdfStatusText = '';
+
+    function setPdfStatus(message, mode = '') {
+        pdfStatusText = message;
+        pdfStatusMode = mode;
+        pdfStatuses.forEach(status => {
+            if (!status) return;
+            status.hidden = !message;
+            status.querySelector('.pdf-status-message').textContent = message;
+            status.querySelectorAll('[data-pdf-action]').forEach(button => {
+                const action = button.dataset.pdfAction;
+                button.hidden = (action === 'share' && mode !== 'share')
+                    || (action === 'retry' && mode !== 'error')
+                    || (action === 'print' && mode !== 'error');
+            });
+        });
+    }
+
+    function setPdfBusy(busy) {
+        pdfBusy = busy;
+        savePdfButtons.forEach(button => {
+            if (!button) return;
+            button.disabled = busy;
+            button.textContent = busy ? 'Preparing PDF...' : 'Save as PDF';
+        });
+        if (busy) setPdfStatus('', '');
+    }
+
+    function showSavedPdfModal() {
+        if (!CAN_SUBMIT || !savedPdfModal || pdfReminderSkipped) return;
+        savedPdfConfirmModal.hidden = true;
+        savedPdfModal.hidden = false;
+        requestAnimationFrame(() => document.getElementById('modalSavePdfBtn').focus());
+    }
+
+    function dismissSavedPdfModal() {
+        if (savedPdfModal.hidden) return;
+        savedPdfModal.hidden = true;
+        if (pdfReminderSkipped) return;
+        savedPdfConfirmModal.hidden = false;
+        requestAnimationFrame(() => document.getElementById('pdfConfirmSaveBtn').focus());
+    }
+
+    function skipSavedPdfReminder() {
+        pdfReminderSkipped = true;
+        savedPdfConfirmModal.hidden = true;
+        savedPdfModal.hidden = true;
+    }
+
+    document.getElementById('modalClosePdfBtn').addEventListener('click', dismissSavedPdfModal);
+    savedPdfModal.addEventListener('click', event => {
+        if (event.target === savedPdfModal) dismissSavedPdfModal();
+    });
+    document.getElementById('pdfConfirmSaveBtn').addEventListener('click', () => {
+        savedPdfConfirmModal.hidden = true;
+        savedPdfModal.hidden = false;
+        generateAndDeliverPdf();
+    });
+    document.getElementById('pdfConfirmSkipBtn').addEventListener('click', skipSavedPdfReminder);
+    savedPdfConfirmModal.addEventListener('click', event => {
+        if (event.target === savedPdfConfirmModal) skipSavedPdfReminder();
+    });
+
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        if (!savedPdfConfirmModal.hidden) {
+            skipSavedPdfReminder();
+        } else if (!savedPdfModal.hidden) {
+            dismissSavedPdfModal();
+        }
+    });
+
+    function loadPinnedScript(src, isReady, currentPromise) {
+        if (isReady()) return Promise.resolve();
+        if (currentPromise) return currentPromise;
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => isReady()
+                ? resolve()
+                : reject(new Error('The PDF library did not load correctly.'));
+            script.onerror = () => reject(new Error('The PDF library could not be loaded. Check your internet connection.'));
+            document.head.appendChild(script);
+        });
+    }
+
+    function loadPdfLibraries() {
+        if (!window.html2canvas) {
+            html2canvasPromise = loadPinnedScript(
+                'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+                () => typeof window.html2canvas === 'function',
+                html2canvasPromise
+            ).catch(error => {
+                html2canvasPromise = null;
+                throw error;
+            });
+        }
+        if (!window.jspdf?.jsPDF) {
+            jsPdfPromise = loadPinnedScript(
+                'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+                () => !!window.jspdf?.jsPDF,
+                jsPdfPromise
+            ).catch(error => {
+                jsPdfPromise = null;
+                throw error;
+            });
+        }
+        return Promise.all([html2canvasPromise || Promise.resolve(), jsPdfPromise || Promise.resolve()]);
+    }
+
+    function buildPdfClone() {
+        const sourceForm = document.getElementById('scoringForm');
+        const sourceTable = document.getElementById('scoringTable');
+        if (!sourceForm || !sourceTable || sourceTable.hidden || !updateScoringAvailability()) {
+            throw new Error('A scoring form must be selected before creating a PDF.');
+        }
+
+        const sourceControls = Array.from(sourceForm.querySelectorAll('input, select, textarea'));
+        const cloneForm = sourceForm.cloneNode(true);
+        const cloneControls = Array.from(cloneForm.querySelectorAll('input, select, textarea'));
+        const renderRoot = document.createElement('div');
+        renderRoot.className = 'pdf-render-root';
+        renderRoot.appendChild(cloneForm);
+        document.body.appendChild(renderRoot);
+
+        try {
+            cloneForm.querySelectorAll(
+                '.form-toolbar, #templateControls, .btn-container, #positionDropdown, #noScoringFormMessage, ' +
+                '.no-print, .is-hidden, .tpl-hidden, [hidden], [aria-hidden="true"], button'
+            ).forEach(node => node.remove());
+
+            const raterDropdown = cloneForm.querySelector('#raterDropdown');
+            if (raterDropdown) {
+                const summary = raterDropdown.querySelector('summary');
+                Array.from(raterDropdown.children).forEach(child => {
+                    if (child !== summary) child.remove();
+                });
+            }
+
+            cloneForm.querySelectorAll('*').forEach(node => {
+                if (getComputedStyle(node).display === 'none') node.remove();
+            });
+
+            cloneControls.forEach((cloneControl, index) => {
+                const sourceControl = sourceControls[index];
+                if (!sourceControl || !cloneControl.isConnected) return;
+                if (sourceControl.type === 'hidden') {
+                    cloneControl.remove();
+                    return;
+                }
+
+                const field = document.createElement('span');
+                field.className = 'pdf-field';
+                if (sourceControl instanceof HTMLInputElement
+                    && (sourceControl.type === 'checkbox' || sourceControl.type === 'radio')) {
+                    field.classList.add('pdf-field-check');
+                    field.textContent = sourceControl.checked ? '✓' : '□';
+                    field.setAttribute('aria-label', sourceControl.checked ? 'Checked' : 'Not checked');
+                } else if (sourceControl instanceof HTMLSelectElement) {
+                    const selected = sourceControl.selectedOptions[0];
+                    field.textContent = selected ? selected.textContent.trim() : '';
+                } else {
+                    field.textContent = sourceControl.value;
+                }
+
+                const style = getComputedStyle(sourceControl);
+                field.style.display = style.display === 'inline' || style.display === 'inline-block'
+                    ? 'inline-block'
+                    : 'block';
+                field.style.textAlign = style.textAlign;
+                field.style.fontWeight = style.fontWeight;
+                field.style.fontSize = style.fontSize;
+                field.style.fontFamily = style.fontFamily;
+                field.style.color = style.color;
+                field.style.verticalAlign = style.verticalAlign;
+                field.style.boxSizing = 'border-box';
+                const inlineWidth = sourceControl.style.width;
+                field.style.width = inlineWidth || '100%';
+                if (field.classList.contains('pdf-field-check')) {
+                    field.style.width = 'auto';
+                    field.style.minWidth = '1em';
+                    field.style.textAlign = 'center';
+                }
+                if (sourceControl instanceof HTMLTextAreaElement) {
+                    field.classList.add('pdf-field-multiline');
+                    field.style.whiteSpace = 'pre-wrap';
+                }
+                cloneControl.replaceWith(field);
+            });
+
+            const raterSummary = cloneForm.querySelector('#raterSummary');
+            if (raterSummary) {
+                raterSummary.style.whiteSpace = 'normal';
+                raterSummary.style.overflow = 'visible';
+                raterSummary.style.textOverflow = 'clip';
+            }
+
+            const cloneTable = cloneForm.querySelector('#scoringTable');
+            if (!cloneTable) {
+                throw new Error('The selected scoring table could not be cloned.');
+            }
+            Array.from(cloneForm.children).forEach(child => {
+                if (child !== cloneTable) child.remove();
+            });
+
+            cloneForm.style.width = '1100px';
+            cloneForm.style.maxWidth = 'none';
+            cloneForm.style.height = 'auto';
+            cloneForm.style.minHeight = '0';
+            cloneForm.style.maxHeight = 'none';
+            cloneForm.style.overflow = 'visible';
+            cloneForm.style.margin = '0';
+            cloneForm.style.boxSizing = 'border-box';
+            cloneForm.style.boxShadow = 'none';
+            cloneTable.style.height = 'auto';
+            cloneTable.style.maxHeight = 'none';
+            cloneTable.style.overflow = 'visible';
+            return { renderRoot, cloneForm, cloneTable };
+        } catch (error) {
+            renderRoot.remove();
+            throw error;
+        }
+    }
+
+    function getPdfContentHeight(cloneTable) {
+        const tableRect = cloneTable.getBoundingClientRect();
+        const lastRowBottom = Array.from(cloneTable.querySelectorAll('tr'))
+            .reduce((bottom, row) => Math.max(
+                bottom,
+                Math.ceil(row.getBoundingClientRect().bottom - tableRect.top)
+            ), 0);
+        return Math.ceil(Math.max(cloneTable.scrollHeight, tableRect.height, lastRowBottom));
+    }
+
+    function getPdfPages(cloneTable, maxStripHeight, maxPageHeight) {
+        const totalHeight = getPdfContentHeight(cloneTable);
+        const tableRect = cloneTable.getBoundingClientRect();
+        const rowEnds = Array.from(cloneTable.querySelectorAll('tr'))
+            .map(row => Math.ceil(row.getBoundingClientRect().bottom - tableRect.top))
+            .filter(bottom => bottom > 0 && bottom <= totalHeight)
+            .sort((a, b) => a - b);
+        rowEnds.push(totalHeight);
+        const pages = [];
+        let pageStart = 0;
+
+        while (pageStart < totalHeight) {
+            const pageLimit = Math.min(pageStart + maxPageHeight, totalHeight);
+            const pageCandidates = rowEnds.filter(bottom => bottom > pageStart && bottom <= pageLimit);
+            const pageEnd = pageCandidates.length
+                ? pageCandidates[pageCandidates.length - 1]
+                : rowEnds.find(bottom => bottom > pageStart);
+            if (!pageEnd || pageEnd - pageStart > maxPageHeight) {
+                throw new Error('A form row is too tall to fit on a PDF page.');
+            }
+
+            const page = { slices: [], height: pageEnd - pageStart };
+            let sliceStart = pageStart;
+            while (sliceStart < pageEnd) {
+                const sliceLimit = Math.min(sliceStart + maxStripHeight, pageEnd);
+                const sliceCandidates = rowEnds.filter(bottom => bottom > sliceStart && bottom <= sliceLimit);
+                const sliceEnd = sliceCandidates.length
+                    ? sliceCandidates[sliceCandidates.length - 1]
+                    : rowEnds.find(bottom => bottom > sliceStart);
+                if (!sliceEnd || sliceEnd > pageEnd) {
+                    throw new Error('Could not find a safe PDF strip boundary.');
+                }
+                page.slices.push({ y: sliceStart, height: sliceEnd - sliceStart });
+                sliceStart = sliceEnd;
+            }
+
+            pages.push(page);
+            pageStart = pageEnd;
+        }
+        return pages;
+    }
+
+    function pdfFilename(candidate, position) {
+        const now = new Date();
+        const date = [
+            now.getFullYear(),
+            String(now.getMonth() + 1).padStart(2, '0'),
+            String(now.getDate()).padStart(2, '0')
+        ].join('-');
+        const clean = value => String(value || '')
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^A-Za-z0-9_-]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        const parts = [clean(candidate), clean(position)].filter(Boolean);
+        if (!parts.length) return 'scoring-form.pdf';
+        const stem = [...parts, date].join('_').slice(0, 76).replace(/_+$/g, '');
+        return (stem || 'scoring-form') + '.pdf';
+    }
+
+    function revokePdfBlobUrl() {
+        if (pdfBlobUrlTimer) clearTimeout(pdfBlobUrlTimer);
+        if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+        pdfBlobUrl = null;
+        pdfBlobUrlTimer = null;
+    }
+
+    function discardPdfArtifacts() {
+        revokePdfBlobUrl();
+        if (pdfDataTimer) clearTimeout(pdfDataTimer);
+        pdfDataTimer = null;
+        pdfFile = null;
+        pdfFileName = '';
+        pdfBlob = null;
+    }
+
+    function ensurePdfBlobUrl() {
+        if (!pdfBlob) throw new Error('The PDF is no longer available. Please create it again.');
+        if (!pdfBlobUrl) {
+            pdfBlobUrl = URL.createObjectURL(pdfBlob);
+            pdfBlobUrlTimer = setTimeout(revokePdfBlobUrl, 60000);
+        }
+        return pdfBlobUrl;
+    }
+
+    function closeModalAfterDelivery() {
+        savedPdfModal.hidden = true;
+        savedPdfConfirmModal.hidden = true;
+    }
+
+    async function shareOrOpenPdf(retryShare = false) {
+        if (!pdfBlob) {
+            setPdfStatus('The PDF is no longer available. Please create it again.', 'error');
+            return;
+        }
+        let canShareFile = false;
+        if (pdfFile && typeof navigator.share === 'function' && typeof navigator.canShare === 'function') {
+            try {
+                canShareFile = navigator.canShare({ files: [pdfFile] });
+            } catch (error) {
+                canShareFile = false;
+            }
+        }
+        if (canShareFile) {
+            try {
+                await navigator.share({ files: [pdfFile], title: pdfFileName });
+                setPdfStatus('', '');
+                closeModalAfterDelivery();
+                return;
+            } catch (error) {
+                if (error && error.name === 'AbortError') return;
+                if (error && error.name === 'NotAllowedError' && !retryShare) {
+                    setPdfStatus('Your PDF is ready. Tap “Share / Open PDF” to share it from a fresh tap.', 'share');
+                    return;
+                }
+                if (error && error.name !== 'NotAllowedError') throw error;
+            }
+        }
+
+        const url = ensurePdfBlobUrl();
+        if (retryShare) {
+            const opened = window.open(url, '_blank', 'noopener');
+            if (!opened) window.print();
+            closeModalAfterDelivery();
+            return;
+        }
+
+        const link = document.createElement('a');
+        if ('download' in link) {
+            link.href = url;
+            link.download = pdfFileName;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            closeModalAfterDelivery();
+            return;
+        }
+
+        const opened = window.open(url, '_blank', 'noopener');
+        if (!opened) window.print();
+        closeModalAfterDelivery();
+    }
+
+    async function generateAndDeliverPdf(retryShare = false) {
+        if (pdfBusy) return;
+        if (retryShare) {
+            try {
+                await shareOrOpenPdf(true);
+            } catch (error) {
+                setPdfStatus('Could not open or share the PDF. Use Print as a fallback.', 'error');
+            }
+            return;
+        }
+
+        setPdfBusy(true);
+        discardPdfArtifacts();
+        try {
+            await loadPdfLibraries();
+            const { renderRoot, cloneForm, cloneTable } = buildPdfClone();
+            try {
+                const jsPDF = window.jspdf.jsPDF;
+                const candidate = document.querySelector('#scoringForm input[name="candidate_name"]')?.value.trim() || '';
+                const position = document.getElementById('position_input')?.value.trim() || '';
+                const cssPxToPt = 0.75;
+                const marginPx = 12;
+                const marginPt = marginPx * cssPxToPt;
+                const pageWidthPt = (1100 + marginPx * 2) * cssPxToPt;
+                const totalHeight = getPdfContentHeight(cloneTable);
+                const pageMaxHeightPt = 14000;
+                const maxPageContentHeight = Math.floor((pageMaxHeightPt - marginPt * 2) / cssPxToPt);
+                const pages = getPdfPages(cloneTable, 1500, maxPageContentHeight);
+                if (!pages.length || totalHeight !== pages.reduce((height, page) => height + page.height, 0)) {
+                    throw new Error('Could not measure the form for PDF export.');
+                }
+                const onPhone = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+                    || window.matchMedia('(pointer: coarse)').matches;
+                const scale = onPhone ? 1.5 : 2;
+                const filename = pdfFilename(candidate, position);
+                const firstPageHeightPt = (pages[0].height + marginPx * 2) * cssPxToPt;
+                const firstPageOrientation = pageWidthPt > firstPageHeightPt ? 'landscape' : 'portrait';
+                const pdf = new jsPDF({
+                    orientation: firstPageOrientation,
+                    unit: 'pt',
+                    format: [pageWidthPt, firstPageHeightPt],
+                    compress: true
+                });
+                const imageWidthPt = 1100 * cssPxToPt;
+
+                for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+                    const page = pages[pageIndex];
+                    if (pageIndex > 0) {
+                        const pageHeightPt = (page.height + marginPx * 2) * cssPxToPt;
+                        const pageOrientation = pageWidthPt > pageHeightPt ? 'landscape' : 'portrait';
+                        pdf.addPage([pageWidthPt, pageHeightPt], pageOrientation);
+                    }
+                    let pageOffsetPx = 0;
+                    for (const slice of page.slices) {
+                        const canvas = await window.html2canvas(cloneTable, {
+                            y: slice.y,
+                            height: slice.height,
+                            width: 1100,
+                            windowWidth: 1100,
+                            windowHeight: Math.max(window.innerHeight, totalHeight),
+                            scale,
+                            backgroundColor: '#ffffff',
+                            scrollX: 0,
+                            scrollY: 0,
+                            useCORS: true,
+                            logging: false
+                        });
+                        try {
+                            const image = canvas.toDataURL('image/jpeg', 0.92);
+                            pdf.addImage(
+                                image,
+                                'JPEG',
+                                marginPt,
+                                marginPt + pageOffsetPx * cssPxToPt,
+                                imageWidthPt,
+                                slice.height * cssPxToPt
+                            );
+                        } finally {
+                            canvas.width = 0;
+                            canvas.height = 0;
+                        }
+                        pageOffsetPx += slice.height;
+                    }
+                }
+
+                pdfBlob = pdf.output('blob');
+                pdfFileName = filename;
+                pdfFile = typeof File === 'function'
+                    ? new File([pdfBlob], filename, { type: 'application/pdf' })
+                    : null;
+                pdfDataTimer = setTimeout(() => {
+                    pdfFile = null;
+                    pdfFileName = '';
+                    pdfBlob = null;
+                    pdfDataTimer = null;
+                }, 60000);
+                try {
+                    await shareOrOpenPdf(false);
+                } catch (error) {
+                    setPdfStatus('Could not share or download the PDF. Use Print as a fallback.', 'error');
+                }
+            } finally {
+                renderRoot.remove();
+            }
+        } catch (error) {
+            const message = error instanceof Error && (
+                error.message.startsWith('A scoring form')
+                || error.message.startsWith('The PDF library')
+            ) ? error.message : 'Could not create the PDF. Please try again.';
+            setPdfStatus(message, 'error');
+        } finally {
+            setPdfBusy(false);
+            if (pdfStatusText) setPdfStatus(pdfStatusText, pdfStatusMode);
+        }
+    }
+
+    savePdfButtons.forEach(button => {
+        if (button) button.addEventListener('click', () => generateAndDeliverPdf());
+    });
+    pdfStatuses.forEach(status => {
+        if (!status) return;
+        status.addEventListener('click', event => {
+            const action = event.target.closest('[data-pdf-action]')?.dataset.pdfAction;
+            if (action === 'retry') generateAndDeliverPdf();
+            if (action === 'share') generateAndDeliverPdf(true);
+            if (action === 'print') window.print();
+        });
+    });
     const ALL_POSITIONS = [
         "Accountant I", "Accountant II", "Accountant III", "Accounting Analyst",
         "Administrative Aide I", "Administrative Aide III", "Administrative Aide IV", "Administrative Aide VI", "Administrative Aide VI (Driver II)",
@@ -950,54 +1631,28 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         }
     });
 
-    const LEADERSHIP_LEVELS = [
-        ["Planning Officer V", "I"], ["Chief Administrative Officer", "I"], ["Attorney V", "I"],
-        ["Development Management Officer V", "I"], ["Engineer V (Geodetic Engineer)", "I"],
-        ["Chief Ecosystems Management Specialist", "I"], ["Provincial Environment & Natural Resources Officer", "I"],
-        ["Community Environment & Natural Resources Officer", "I"], ["Community Environment & Natural Resources Officer (CENRO)", "I"],
-        ["Senior Communications Development Officer", "B"], ["Planning Officer IV", "B"], ["Planning Officer III", "B"],
-        ["Project Evaluation Officer III", "B"], ["Information Systems Analyst III", "B"],
-        ["Supervising Administrative Officer", "B"], ["Administrative Officer V", "B"],
-        ["Administrative Officer V (Budget Officer III)", "B"], ["Administrative Officer V (HRMO III)", "B"],
-        ["Administrative Officer V (Cashier III)", "B"], ["Accountant III", "B"],
-        ["Attorney IV", "B"], ["Attorney III", "B"], ["Attorney II", "B"],
-        ["Development Management Officer IV", "B"], ["Development Management Officer III", "B"],
-        ["Engineer IV (Geodetic Engineer)", "B"], ["Engineer III (Geodetic Engineer)", "B"], ["Engineer II (Geodetic Engineer)", "B"],
-        ["Forester III", "B"], ["Supervising Ecosystems Management Specialist", "B"],
-        ["Senior Ecosystems Management Specialist", "B"], ["Land Management Officer III", "B"]
-    ];
-
-    const LEADERSHIP_ALIASES = [
-        ["ATY","V","I"], ["ATY","IV","B"], ["ATY","III","B"], ["ATY","II","B"],
-        ["ATTY","V","I"], ["ATTY","IV","B"], ["ATTY","III","B"], ["ATTY","II","B"],
-        ["DMO","V","I"], ["DMO","IV","B"], ["DMO","III","B"],
-        ["ENG","V","I"], ["ENG","IV","B"], ["ENG","III","B"], ["ENG","II","B"],
-        ["PLO","V","I"], ["PLO","IV","B"], ["PLO","III","B"],
-        ["PEO","III","B"], ["LAMO","III","B"], ["FORST","III","B"], ["INFOSA","III","B"], ["ISA","III","B"],
-        ["A","III","B"], ["ADOF","V","B"], ["AO","V","B"],
-        ["SADOF","","B"], ["SAO","","B"], ["SVEMS","","B"], ["SREMS","","B"], ["SRCDO","","B"],
-        ["CECMS","","I"], ["CADOF","","I"], ["CAO","","I"], ["CENRO","","I"],
-        ["PENRO","","I"]
-    ];
+    const LEADERSHIP_LEVELS = <?php echo json_encode($leadershipPositionLevels, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    const LEADERSHIP_ALIASES = <?php echo json_encode($leadershipAliases, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     const NUMERAL_DIGIT = { II: "2", III: "3", IV: "4", V: "5" };
     let POSITION_SG_MAP = {};
     let positionApiTitles = [];
     let lastAutoSgPosition = '';
     const RESTRICT_DROPDOWN_TO_API_LIST = false;
 
-    const LC_INTERMEDIATE = [
-        "Ensures that others support the DENR’s mission, goals, agenda, climate, and policy",
-        "Ensures the effective implementation of any change initiatives/programs of the DENR by guiding the team in the transition process",
-        "Motivates, trains, coaches and mentors people towards achieving quality results",
-        "Monitors employee performance regularly to help employee improve his/her performance",
-        "Builds and develops local partnerships and networks and identifies to deliver or enhance work outcomes"
-    ];
+    const LEADERSHIP_BASIC_ROWS = <?php echo json_encode($basicLeadershipRows, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    const LEADERSHIP_ADVANCED_ROWS = <?php echo json_encode($advancedLeadershipRows, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
     function normPosition(s) {
         return String(s || '').replace(/&/g, ' AND ').replace(/\s+/g, ' ').trim().toUpperCase();
     }
     function compactPosition(s) {
         return normPosition(s).replace(/[^\p{L}\p{N}]/gu, '');
+    }
+    function templatePositionTitle(title, prefix) {
+        const position = String(title || '').startsWith(prefix) ? String(title).slice(prefix.length) : '';
+        return (['SG 6 - ', 'SG 7 - ', 'SG 8 - ', 'SG 10 - ', 'SG 11 - ', 'SG 18 - ', 'SG 19 - ', 'SG 20 - ', 'SG 21 - ', 'SG 22 - ', 'SG 23 - '].includes(prefix))
+            ? position.replace(/\s+\[Field Office\]$/i, '').replace(/\s+\[RO: [^\]]+\]$/i, '').trim()
+            : position.trim();
     }
     function compactNoParens(s) {
         return compactPosition(String(s || '').replace(/\([^)]*\)/g, ' '));
@@ -1057,67 +1712,46 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         return (base !== '' && base in LEADERSHIP_LEVEL_MAP) ? LEADERSHIP_LEVEL_MAP[base] : null;
     }
 
-    const LC_BASIC = [1, 2, 3, 4, 5].map(i => document.getElementById('lcDesc' + i).textContent);
+    const LC_BASIC = LEADERSHIP_BASIC_ROWS.map(row => row.desc);
+    const LC_ADVANCED = LEADERSHIP_ADVANCED_ROWS.map(row => row.desc);
 
     function currentPosition() {
         return positionInput ? positionInput.value.trim() : '';
     }
 
-    function currentSalaryGrade() {
-        const selectedGrade = Number(salaryGradeSelect.value);
-        if (salaryGradeSelect.value !== '' && Number.isInteger(selectedGrade)) return selectedGrade;
-        const positionGrade = salaryGradeFor(currentPosition());
-        return Number.isInteger(positionGrade) ? positionGrade : null;
-    }
-
-    function isBasicPosition() {
-        const salaryGrade = currentSalaryGrade();
-        return salaryGrade !== null && salaryGrade <= BASIC_MAX_SG;
-    }
-
     function applyFormLayout() {
         autofillSalaryGrade();
+        const candidateGrade = Number(salaryGradeSelect.value);
+        const templateLead = selectedTemplateLayout.sections?.lead;
         const positionLeadershipLevel = leadershipLevelFor(currentPosition());
-        const basicPosition = isBasicPosition();
-        const leadSection = selectedTemplateLayout.sections?.lead?.standard ? selectedTemplateLayout.sections.lead : null;
-        const selectedTemplate = !!competencyTemplateIdInput.value;
-        const hideLeadership = basicPosition || (selectedTemplate && !leadSection);
-        document.getElementById('coreLevelLabel').textContent = basicPosition
-            ? 'Basic'
-            : (selectedTemplateLayout.sections?.core?.level || 'Evidence');
-        document.getElementById('orgLevelLabel').textContent = basicPosition
-            ? 'Basic'
-            : (selectedTemplateLayout.sections?.org?.level || 'Advanced');
-        document.getElementById('funcLevelLabel').textContent = basicPosition
-            ? 'Basic'
-            : (selectedTemplateLayout.sections?.func?.level || 'Advanced');
+        const showLeadership = Number.isInteger(candidateGrade)
+            && candidateGrade > BASIC_MAX_SG
+            && !!templateLead
+            && (positionLeadershipLevel === 'B' || positionLeadershipLevel === 'I');
         const leadershipDescriptions = positionLeadershipLevel === 'I'
-            ? LC_INTERMEDIATE
+            ? LC_ADVANCED
             : (positionLeadershipLevel === 'B' ? LC_BASIC_DEFAULT : LC_BASIC);
         for (let i = 1; i <= 5; i++) {
             document.getElementById('lcDesc' + i).textContent = leadershipDescriptions[i - 1];
         }
-        if (positionLeadershipLevel && !selectedTemplateLayout.sections?.lead) {
-            leadershipLevelInput.value = positionLeadershipLevel === 'I' ? 'Advanced' : 'Basic';
-        }
+        const leadershipLabel = positionLeadershipLevel === 'I' ? 'Advanced'
+            : (positionLeadershipLevel === 'B' ? 'Basic' : (templateLead?.level || ''));
+        leadershipLevelInput.value = leadershipLabel;
 
         document.querySelectorAll('tr.leadership-row').forEach(row => {
-            row.classList.toggle('is-hidden', hideLeadership);
+            row.classList.toggle('is-hidden', !showLeadership);
             row.querySelectorAll('input, select, textarea').forEach(el => {
-                if (hideLeadership) {
-                    if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
-                    else el.value = '';
+                el.disabled = !showLeadership || row.classList.contains('tpl-hidden');
+                if (!showLeadership && (el.name.startsWith('lc') || el.name.startsWith('evidence_lc') || el.dataset.section === 'lead')) {
+                    el.value = '';
                 }
-                el.disabled = hideLeadership;
             });
         });
-        if (!hideLeadership && !leadSection) {
-            leadershipHeadingInput.value = 'Leadership Competencies';
-            leadershipLevelInput.value = positionLeadershipLevel === 'I' ? 'Advanced' : 'Basic';
-        }
-        const canEditLabels = canEditTemplateLabels && selectedTemplate && !!leadSection?.standard && !hideLeadership;
+        const leadSection = templateLead?.standard ? templateLead : null;
+        const canEditLabels = canEditTemplateLabels && !!competencyTemplateIdInput.value && !!leadSection && showLeadership;
         leadershipHeadingInput.disabled = !canEditLabels;
-        leadershipLevelInput.disabled = !canEditLabels;
+        leadershipLevelInput.disabled = true;
+        updateScoringAvailability();
         if (typeof markEdited === 'function') markEdited();
     }
 
@@ -1149,7 +1783,6 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         }, 0);
     });
 
-    let raterClickOrder = [];
     const undoButton = document.getElementById('undoButton');
     const undoHistory = [];
     const lastControlStates = new WeakMap();
@@ -1231,33 +1864,31 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     }
 
     function selectedRaters() {
-        return Array.from(document.querySelectorAll('input.rater-check:checked'));
-    }
-
-    function syncRaterOrder() {
-        const checked = selectedRaters().map(c => c.dataset.label);
-        raterClickOrder = raterClickOrder.filter(l => checked.includes(l));
-        checked.forEach(l => { if (!raterClickOrder.includes(l)) raterClickOrder.push(l); });
+        const selected = document.querySelector('#raterPositionControl input[name="raters[]"]:checked');
+        return selected ? [selected.value] : [];
     }
 
     function updateRaterSummary() {
-        syncRaterOrder();
+        const selected = selectedRaters();
         const summary = document.getElementById('raterSummary');
-        summary.textContent = raterClickOrder.length ? raterClickOrder.join(', ') : '-- Select Raters --';
-        if (raterClickOrder.length) summary.removeAttribute('data-empty'); else summary.setAttribute('data-empty', '1');
-        document.getElementById('ratersOrder').value = raterClickOrder.join(',');
+        if (summary) {
+            summary.textContent = selected.length ? selected[0] : '-- Select Rater Position --';
+            if (selected.length) summary.removeAttribute('data-empty');
+            else summary.setAttribute('data-empty', '1');
+        }
+        const orderInput = document.getElementById('ratersOrder');
+        orderInput.value = selected.length ? selected[0] : '';
+        orderInput.defaultValue = '';
     }
 
-    function toggleAllRaters() {
-        const boxes = Array.from(document.querySelectorAll('input.rater-check'));
-        const allOn = boxes.every(b => b.checked);
-        boxes.forEach(b => { b.checked = !allOn; });
-        if (allOn) raterClickOrder = [];
-        updateRaterSummary();
-    }
-
-    document.querySelectorAll('input.rater-check').forEach(b => b.addEventListener('change', updateRaterSummary));
-    document.getElementById('scoringForm').addEventListener('reset', () => setTimeout(() => { raterClickOrder = []; updateRaterSummary(); }, 0));
+    document.querySelectorAll('input.rater-choice').forEach(radio => {
+        radio.addEventListener('change', () => {
+            updateRaterSummary();
+            const dropdown = document.getElementById('raterDropdown');
+            if (dropdown) dropdown.open = false;
+        });
+    });
+    document.getElementById('scoringForm').addEventListener('reset', () => setTimeout(updateRaterSummary, 0));
     updateRaterSummary();
     document.addEventListener('click', e => {
         const dd = document.getElementById('raterDropdown');
@@ -1275,6 +1906,8 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             alert('Your account is view-only. Ask an administrator for a Rater account.');
             return;
         }
+        if (scoringSaveBusy) return;
+        if (!updateScoringAvailability()) return;
 
         const form = document.getElementById('scoringForm');
         const btn  = document.getElementById('saveBtn');
@@ -1284,8 +1917,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
         updateRaterSummary();
         syncCustomCompetencies();
-        if (selectedRaters().length === 0) {
-            alert('Please select at least one rater.');
+        const selectedRaterPositions = selectedRaters();
+        if (selectedRaterPositions.length !== 1) {
+            alert('Choose one rater position before saving.');
             return;
         }
 
@@ -1295,7 +1929,9 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         }
 
         btn.disabled = true;
+        scoringSaveBusy = true;
         let savedOk = false;
+        const submittedDraftState = JSON.stringify(collectDraftState());
 
         fetch('submit_score.php', {
             method: 'POST',
@@ -1315,13 +1951,17 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             if (ok && data.status === 'success') {
                 savedOk = true;
                 markSaved();
-                alert('Saved successfully! You can now print this sheet, or click "New Sheet" for the next one.');
+                showSavedPdfModal();
+                persistDraftSnapshot(submittedDraftState);
             } else {
                 alert(data.message || 'Failed to save.');
             }
         })
         .catch(err => alert('Error saving data:\n' + err.message))
-        .finally(() => { if (!savedOk) btn.disabled = false; });
+        .finally(() => {
+            scoringSaveBusy = false;
+            if (!savedOk) btn.disabled = false;
+        });
     }
 
     function markSaved() {
@@ -1351,8 +1991,11 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     const templateLoadStatus = document.getElementById('templateLoadStatus');
     const leadershipHeadingInput = document.getElementById('lcHeadingText');
     const leadershipLevelInput = document.getElementById('lcLevelLabel');
+    const scoringTable = document.getElementById('scoringTable');
+    const noScoringFormMessage = document.getElementById('noScoringFormMessage');
     const canEditTemplateLabels = <?php echo json_encode(current_role() === 'rater'); ?>;
     let selectedTemplateLayout = { sections: {} };
+    let loadedTemplateMeta = null;
     let leadershipLabelsDirty = false;
     let pendingLeadershipLabelSave = Promise.resolve(true);
     let resumeFormSubmitAfterLabelSave = false;
@@ -1361,6 +2004,28 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     const STD_SECTIONS = ['core', 'org', 'lead', 'func'];
     const LC_BASIC_DEFAULT = LC_BASIC.slice();
     const stdOriginals = {};
+
+    function updateScoringAvailability() {
+        const salaryGrade = Number(salaryGradeSelect.value);
+        const templateTitle = String(loadedTemplateMeta?.title || '');
+        const prefix = 'SG ' + salaryGrade + ' - ';
+        const templatePosition = templatePositionTitle(templateTitle, prefix);
+        const titleMatches = templatePosition !== ''
+            && compactPosition(templatePosition) === compactPosition(currentPosition());
+        const available = !!competencyTemplateIdInput.value
+            && !!loadedTemplateMeta
+            && Number.isInteger(salaryGrade)
+            && salaryGrade >= Number(loadedTemplateMeta.min_salary_grade)
+            && salaryGrade <= Number(loadedTemplateMeta.max_salary_grade)
+            && (Number(loadedTemplateMeta.is_shared) === 1 || IS_ADMIN)
+            && titleMatches
+            && Object.keys(selectedTemplateLayout.sections || {}).length > 0;
+        scoringTable.hidden = !available;
+        noScoringFormMessage.hidden = available;
+        const saveButton = document.getElementById('saveBtn');
+        if (saveButton) saveButton.disabled = !available || !CAN_SUBMIT;
+        return available;
+    }
 
     function stdRowMap() {
         const map = {};
@@ -1374,23 +2039,26 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
 
     function applyStandardRows(layout) {
         const sections = (layout && layout.sections) || {};
-        const basicPosition = isBasicPosition();
+        document.getElementById('sectionHeader_core').classList.toggle('tpl-hidden', !sections.core?.standard);
+        document.getElementById('sectionHeader_org').classList.toggle('tpl-hidden', !sections.org?.standard);
+        document.getElementById('coreLevelLabel').textContent = sections.core?.standard ? (sections.core.level || '') : '';
+        document.getElementById('orgLevelLabel').textContent = sections.org?.standard ? (sections.org.level || '') : '';
+        document.getElementById('funcLevelLabel').textContent = sections.func?.standard ? (sections.func.level || '') : '';
         const functionalHeader = document.getElementById('sectionHeader_func');
         if (functionalHeader) {
-            functionalHeader.classList.toggle('tpl-hidden', !!sections.func?.custom);
+            functionalHeader.classList.toggle('tpl-hidden', !sections.func?.standard);
         }
         const leadSection = sections.lead && sections.lead.standard ? sections.lead : null;
-        leadershipHeadingInput.value = leadSection?.label || 'Leadership Competencies';
-        leadershipLevelInput.value = leadSection?.level || 'Basic';
+        leadershipHeadingInput.value = leadSection?.label || '';
+        leadershipLevelInput.value = leadSection?.level || '';
         const canEditLabels = canEditTemplateLabels && !!competencyTemplateIdInput.value
             && !!selectedTemplateLayout.sections?.lead?.standard;
         leadershipHeadingInput.disabled = !canEditLabels;
         leadershipLevelInput.disabled = !canEditLabels;
         const fromTemplate = {};
-        let usesTemplate = false;
+        const usesTemplate = !!competencyTemplateIdInput.value;
         STD_SECTIONS.forEach(key => {
-            if (!sections[key]) return;
-            usesTemplate = true;
+            if (!sections[key]?.standard) return;
             (sections[key].rows || []).forEach(row => { fromTemplate[row.id] = row; });
         });
 
@@ -1410,10 +2078,10 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             const hide = usesTemplate && !row;
             titleRow.classList.toggle('tpl-hidden', hide);
             descRow.classList.toggle('tpl-hidden', hide);
+            titleRow.querySelectorAll('input, select, textarea').forEach(input => { input.disabled = hide; });
+            descRow.querySelectorAll('input, select, textarea').forEach(input => { input.disabled = hide; });
             titleCell.textContent = row ? (row.title || '') : stdOriginals[id].title;
-            let desc = row ? (row.desc || '') : stdOriginals[id].desc;
-            if (basicPosition && BASIC_CORE_DESCRIPTIONS[id]) desc = BASIC_CORE_DESCRIPTIONS[id];
-            if (basicPosition && BASIC_ORG_DESCRIPTIONS[id]) desc = BASIC_ORG_DESCRIPTIONS[id];
+            const desc = row ? (row.desc || '') : stdOriginals[id].desc;
             if (isLead) LC_BASIC[Number(id.slice(2)) - 1] = desc;
             else descCell.textContent = desc;
         });
@@ -1484,19 +2152,25 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     });
 
     document.getElementById('scoringForm').addEventListener('submit', async event => {
-        if (resumeFormSubmitAfterLabelSave || !leadershipLabelsDirty) return;
-        event.preventDefault();
         const form = event.currentTarget;
-        const saved = await pendingLeadershipLabelSave;
-        if (!saved) return;
-        resumeFormSubmitAfterLabelSave = true;
-        if (event.submitter) form.requestSubmit(event.submitter);
-        else form.requestSubmit();
+        if (!CAN_SUBMIT) return;
+        if (leadershipLabelsDirty && !resumeFormSubmitAfterLabelSave) {
+            event.preventDefault();
+            const saved = await pendingLeadershipLabelSave;
+            if (!saved) return;
+            resumeFormSubmitAfterLabelSave = true;
+            if (event.submitter) form.requestSubmit(event.submitter);
+            else form.requestSubmit();
+            return;
+        }
+        resumeFormSubmitAfterLabelSave = false;
+        event.preventDefault();
+        saveOnly();
     });
 
     async function loadCompetencyTemplates() {
         const salaryGrade = salaryGradeSelect.value;
-        competencyTemplateSelect.replaceChildren(new Option('-- Standard competencies --', ''));
+        competencyTemplateSelect.replaceChildren(new Option('-- Select a designated form --', ''));
         if (salaryGrade === '') return;
         const manageTemplates = IS_ADMIN ? '&manage_templates=1' : '';
         const response = await fetch('template_api.php?action=template_list&salary_grade=' + encodeURIComponent(salaryGrade) + manageTemplates, { credentials: 'same-origin' });
@@ -1526,7 +2200,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             } else {
                 templateLoadStatus.textContent = 'This sheet is not available for the selected candidate salary grade. Choose a grade within the sheet range or select another sheet.';
             }
-        } else if (document.getElementById('office_name').value === 'Regional Office') {
+        } else if (IS_ADMIN) {
             const position = currentPosition();
             const exactPositionKey = compactPosition(position);
             const basePositionKey = compactNoParens(position);
@@ -1535,12 +2209,12 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 const matchingTemplate = data.templates.find(template => {
                     const title = String(template.title || '');
                     if (!title.startsWith(prefix)) return false;
-                    const templatePosition = title.slice(prefix.length);
+                    const templatePosition = templatePositionTitle(title, prefix);
                     return compactPosition(templatePosition) === exactPositionKey;
                 }) || data.templates.find(template => {
                     const title = String(template.title || '');
                     if (!title.startsWith(prefix)) return false;
-                    return compactNoParens(title.slice(prefix.length)) === basePositionKey;
+                    return compactNoParens(templatePositionTitle(title, prefix)) === basePositionKey;
                 });
                 if (matchingTemplate) {
                     competencyTemplateSelect.value = String(matchingTemplate.id);
@@ -1556,15 +2230,16 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         customSectionsBody.replaceChildren();
         Object.entries(selectedTemplateLayout.sections).forEach(([sectionKey, section]) => {
             if (!section || !section.custom) return;
-            if (isBasicPosition() && sectionKey === 'lead') return;
             const header = document.createElement('tr');
-            header.className = 'custom-section-row';
+            header.className = 'custom-section-row' + (sectionKey === 'lead' ? ' leadership-row template-custom-leadership-row' : '');
             const sectionTitle = document.createElement('th');
             sectionTitle.className = 'sec-header';
             sectionTitle.textContent = section.label || 'Untitled section';
             const sectionLevel = document.createElement('th');
             sectionLevel.className = 'sec-header';
-            sectionLevel.textContent = section.level || 'Advanced';
+            const positionLeadershipLevel = sectionKey === 'lead' ? leadershipLevelFor(currentPosition()) : null;
+            sectionLevel.textContent = positionLeadershipLevel === 'I' ? 'Advanced'
+                : (positionLeadershipLevel === 'B' ? 'Basic' : (section.level || ''));
             const ratingHeading = document.createElement('th');
             ratingHeading.className = 'sec-header';
             ratingHeading.textContent = 'Rating';
@@ -1574,7 +2249,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             (section.rows || []).forEach(row => {
                 if ((row.title || '').trim() !== '') {
                     const titleRow = document.createElement('tr');
-                    titleRow.className = 'custom-section-row';
+                    titleRow.className = 'custom-section-row' + (sectionKey === 'lead' ? ' leadership-row template-custom-leadership-row' : '');
                     const titleCell = document.createElement('td');
                     titleCell.className = 'comp-title';
                     titleCell.textContent = row.title;
@@ -1583,13 +2258,14 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 }
 
                 const competencyRow = document.createElement('tr');
-                competencyRow.className = 'custom-section-row';
+                competencyRow.className = 'custom-section-row' + (sectionKey === 'lead' ? ' leadership-row template-custom-leadership-row' : '');
                 const description = document.createElement('td');
                 description.textContent = row.desc || '';
                 const evidenceCell = document.createElement('td');
                 const evidence = document.createElement('input');
                 evidence.type = 'text';
                 evidence.autocomplete = 'off';
+                evidence.name = 'evidence_' + row.id;
                 evidence.dataset.customEvidence = '1';
                 evidence.dataset.section = sectionKey;
                 evidence.dataset.rowId = row.id;
@@ -1602,6 +2278,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 rating.min = '0';
                 rating.max = '10';
                 rating.placeholder = '0.00';
+                rating.name = row.id;
                 rating.dataset.customRating = '1';
                 rating.dataset.section = sectionKey;
                 rating.dataset.rowId = row.id;
@@ -1617,6 +2294,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
     async function selectCompetencyTemplate(templateId) {
         templateLoadStatus.textContent = '';
         competencyTemplateIdInput.value = '';
+        loadedTemplateMeta = null;
         if (!templateId) {
             renderCustomCompetencies({ sections: {} });
             markEdited();
@@ -1632,7 +2310,21 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
                 throw new Error(data.message || 'Unable to load the selected template.');
             }
             if (salaryGradeSelect.value !== salaryGrade || competencyTemplateSelect.value !== templateId) return;
+            const title = String(data.template.title || '');
+            const prefix = 'SG ' + salaryGrade + ' - ';
+            if (!title.startsWith(prefix)
+                || Number(salaryGrade) < Number(data.template.min_salary_grade)
+                || Number(salaryGrade) > Number(data.template.max_salary_grade)
+                || (Number(data.template.is_shared) !== 1 && !IS_ADMIN)) {
+                throw new Error('No scoring form is available for this position. Ask an administrator to generate it.');
+            }
+            const templatePosition = templatePositionTitle(title, prefix);
+            if (IS_ADMIN && currentPosition() === '') positionInput.value = templatePosition;
+            if (compactPosition(templatePosition) !== compactPosition(currentPosition())) {
+                throw new Error('No scoring form is available for this position. Ask an administrator to generate it.');
+            }
             competencyTemplateIdInput.value = String(data.template.id);
+            loadedTemplateMeta = data.template;
             renderCustomCompetencies(data.template.layout);
             templateLoadStatus.textContent = '';
             markEdited();
@@ -1640,6 +2332,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             if (salaryGradeSelect.value !== salaryGrade || competencyTemplateSelect.value !== templateId) return;
             templateLoadStatus.textContent = error.message;
             competencyTemplateSelect.value = '';
+            loadedTemplateMeta = null;
             renderCustomCompetencies({ sections: {} });
         }
     }
@@ -1665,10 +2358,318 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         customCompetenciesInput.value = JSON.stringify(sections);
     }
 
+    const draftStatus = document.getElementById('draftSaveStatus');
+    const draftUnavailableNotice = document.getElementById('draftUnavailableNotice');
+    const resumeDraftModal = document.getElementById('resumeDraftModal');
+    let draftDirty = false;
+    let draftSaveTimer = null;
+    let draftIsReadOnly = false;
+    let activeDraftId = null;
+    let draftChangeVersion = 0;
+
+    async function draftRequest(action, extra = {}, keepalive = false) {
+        const response = await fetch('draft_api.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            keepalive,
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ action, csrf_token: CSRF_TOKEN, ...extra })
+        });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'success') {
+            throw new Error(data.message || 'Could not save this form.');
+        }
+        return data;
+    }
+
+    function collectDraftState() {
+        const fields = {};
+        document.querySelectorAll('#scoringForm input[name], #scoringForm select[name], #scoringForm textarea[name]')
+            .forEach(control => {
+                if (['csrf_token', <?php echo json_encode(HONEYPOT_FIELD); ?>].includes(control.name)) return;
+                let state;
+                if (control instanceof HTMLInputElement
+                    && (control.type === 'checkbox' || control.type === 'radio')) {
+                    state = { type: control.type, value: control.value, checked: control.checked };
+                } else {
+                    state = { type: control.tagName.toLowerCase(), value: control.value };
+                }
+                if (!fields[control.name]) fields[control.name] = [];
+                fields[control.name].push(state);
+            });
+        return {
+            fields,
+            template_updated_at: loadedTemplateMeta?.updated_at || null
+        };
+    }
+
+    function formHasUserData() {
+        const controls = Array.from(document.querySelectorAll(
+            '#scoringForm input[name], #scoringForm select[name], #scoringForm textarea[name]'
+        ));
+        return controls.some(control => {
+            if (control.disabled || ['csrf_token', <?php echo json_encode(HONEYPOT_FIELD); ?>,
+                'custom_competencies_json', 'competency_template_id', 'salary_grade', 'lc_heading', 'lc_level',
+                'interview_date'].includes(control.name)) return false;
+            if (control instanceof HTMLInputElement && (control.type === 'radio' || control.type === 'checkbox')) {
+                return control.checked;
+            }
+            return String(control.value || '').trim() !== '';
+        });
+    }
+
+    function draftTimestampLabel(value) {
+        const date = value ? new Date(String(value).replace(' ', 'T')) : new Date();
+        return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+
+    async function saveDraftNow(force = false, keepalive = false, formJsonOverride = null) {
+        if (!CAN_SUBMIT || draftIsReadOnly || (!draftDirty && !force)
+            || (formJsonOverride === null && !formHasUserData())) return false;
+        const savedVersion = draftChangeVersion;
+        const formJson = formJsonOverride ?? JSON.stringify(collectDraftState());
+        if (new TextEncoder().encode(formJson).length > 204800) {
+            if (draftStatus) draftStatus.textContent = 'Could not save draft';
+            return false;
+        }
+        if (draftStatus) draftStatus.textContent = 'Saving draft…';
+        try {
+            const result = await draftRequest('save_draft', { form_json: formJson }, keepalive);
+            activeDraftId = result.id;
+            draftDirty = draftChangeVersion !== savedVersion;
+            if (draftDirty && !draftSaveTimer) {
+                draftSaveTimer = setTimeout(() => {
+                    draftSaveTimer = null;
+                    saveDraftNow();
+                }, 8000);
+            }
+            if (draftStatus) draftStatus.textContent = 'Draft saved ' + draftTimestampLabel(result.saved_at);
+            return true;
+        } catch (error) {
+            if (draftStatus) draftStatus.textContent = 'Could not save draft';
+            return false;
+        }
+    }
+
+    async function persistDraftSnapshot(formJson) {
+        if (draftSaveTimer) clearTimeout(draftSaveTimer);
+        draftSaveTimer = null;
+        draftDirty = true;
+        const saved = await saveDraftNow(true, false, formJson);
+        if (!saved) return false;
+        try {
+            await draftRequest('mark_saved');
+            if (draftStatus) draftStatus.textContent = 'Saved to My recent forms';
+            return true;
+        } catch (error) {
+            if (draftStatus) draftStatus.textContent = 'Could not save recent form';
+            return false;
+        }
+    }
+
+    function scheduleDraftSave() {
+        if (!CAN_SUBMIT || draftIsReadOnly) return;
+        draftChangeVersion++;
+        draftDirty = true;
+        if (draftSaveTimer) clearTimeout(draftSaveTimer);
+        draftSaveTimer = setTimeout(() => {
+            draftSaveTimer = null;
+            saveDraftNow();
+        }, 8000);
+    }
+
+    function restoreDraftFields(formState) {
+        if (!formState || !formState.fields) return;
+        Object.entries(formState.fields).forEach(([name, savedStates]) => {
+            if (['csrf_token', <?php echo json_encode(HONEYPOT_FIELD); ?>, 'custom_competencies_json'].includes(name)) return;
+            const controls = Array.from(document.querySelectorAll('#scoringForm [name]'))
+                .filter(control => control.name === name);
+            if (!controls.length || !Array.isArray(savedStates)) return;
+            controls.forEach(control => {
+                const state = savedStates.find(item =>
+                    (control.type === 'radio' || control.type === 'checkbox')
+                        ? item.value === control.value
+                        : true
+                );
+                if (!state) return;
+                if (control instanceof HTMLInputElement && (control.type === 'radio' || control.type === 'checkbox')) {
+                    control.checked = Boolean(state.checked);
+                } else {
+                    control.value = state.value == null ? '' : String(state.value);
+                }
+            });
+        });
+        updateRaterSummary();
+        document.querySelectorAll('#scoringForm input, #scoringForm select, #scoringForm textarea').forEach(control => {
+            lastControlStates.set(control, readControlState(control));
+        });
+    }
+
+    function setSavedFormReadOnly() {
+        draftIsReadOnly = true;
+        document.body.classList.add('saved-form-readonly');
+        document.getElementById('templateControls').hidden = true;
+        document.querySelectorAll('#scoringForm input, #scoringForm select, #scoringForm textarea').forEach(control => {
+            control.disabled = true;
+        });
+        ['saveBtn', 'newSheetBtn', 'undoButton'].forEach(id => {
+            const button = document.getElementById(id);
+            if (button) button.hidden = true;
+        });
+        document.querySelectorAll('#scoringForm button[type="reset"]').forEach(button => { button.hidden = true; });
+        if (draftStatus) draftStatus.textContent = 'Read-only saved form';
+    }
+
+    async function restoreStoredForm(data, readOnly) {
+        if (!data || !data.form_json) return;
+        let state;
+        try {
+            state = JSON.parse(data.form_json);
+        } catch (error) {
+            if (templateLoadStatus) templateLoadStatus.textContent = 'This saved form could not be restored.';
+            return;
+        }
+
+        const savedFields = state.fields || {};
+        const savedGrade = savedFields.salary_grade?.[0]?.value;
+        if (savedGrade !== undefined && savedGrade !== null && savedGrade !== '') salaryGradeSelect.value = String(savedGrade);
+        const savedPosition = savedFields.position_title?.[0]?.value;
+        if (savedPosition !== undefined) positionInput.value = String(savedPosition);
+        if (!IS_ADMIN && positionInput.value !== '') positionInput.readOnly = true;
+        const savedOffice = savedFields.office_name?.[0]?.value;
+        if (savedOffice !== undefined) document.getElementById('office_name').value = String(savedOffice);
+
+        if (data.template_available === false) {
+            draftUnavailableNotice.hidden = false;
+            document.getElementById('discardUnavailableDraftBtn').hidden = readOnly;
+            if (templateLoadStatus) templateLoadStatus.textContent = 'This form is no longer available.';
+            return;
+        }
+
+        if (salaryGradeSelect.value !== '') await loadCompetencyTemplates();
+        const templateId = savedFields.competency_template_id?.[0]?.value;
+        if (templateId) {
+            const optionExists = Array.from(competencyTemplateSelect.options).some(option => option.value === String(templateId));
+            if (!optionExists) {
+                draftUnavailableNotice.hidden = false;
+                document.getElementById('discardUnavailableDraftBtn').hidden = readOnly;
+                if (templateLoadStatus) templateLoadStatus.textContent = 'This form is no longer available.';
+                return;
+            }
+            competencyTemplateSelect.value = String(templateId);
+            await selectCompetencyTemplate(String(templateId));
+            if (!loadedTemplateMeta) {
+                draftUnavailableNotice.hidden = false;
+                document.getElementById('discardUnavailableDraftBtn').hidden = readOnly;
+                return;
+            }
+        }
+
+        applyFormLayout();
+        restoreDraftFields(state);
+        if (data.template_changed && templateLoadStatus) {
+            templateLoadStatus.textContent = 'This form was updated. Existing matching fields were restored.';
+        }
+        if (readOnly) setSavedFormReadOnly();
+        else {
+            activeDraftId = data.draft?.id ?? null;
+            draftDirty = false;
+        }
+        if (new URLSearchParams(window.location.search).get('export_pdf') === '1') {
+            setTimeout(() => generateAndDeliverPdf(), 250);
+        }
+    }
+
+    function showResumePrompt(draft) {
+        if (!draft || !resumeDraftModal) return;
+        const description = document.getElementById('resumeDraftDescription');
+        const edited = draftTimestampLabel(draft.updated_at);
+        description.textContent = [
+            draft.candidate_name || 'Unnamed candidate',
+            draft.position_title || 'Position not selected',
+            'Last edited ' + (edited || draft.updated_at)
+        ].join(' · ');
+        resumeDraftModal.hidden = false;
+        document.getElementById('continueDraftBtn').focus();
+    }
+
+    document.getElementById('continueDraftBtn').addEventListener('click', () => {
+        window.location.href = 'index.php?resume_draft=1';
+    });
+    document.getElementById('notNowDraftBtn').addEventListener('click', () => {
+        resumeDraftModal.hidden = true;
+    });
+    document.getElementById('discardDraftBtn').addEventListener('click', async () => {
+        if (!activeDraftId || !window.confirm('Discard this draft? This cannot be undone.')) return;
+        try {
+            await draftRequest('discard_draft', { id: activeDraftId });
+            activeDraftId = null;
+            resumeDraftModal.hidden = true;
+            if (draftStatus) draftStatus.textContent = '';
+        } catch (error) {
+            document.getElementById('resumeDraftDescription').textContent = 'Could not discard the draft. Please try again.';
+        }
+    });
+
+    document.getElementById('discardUnavailableDraftBtn').addEventListener('click', async () => {
+        if (!window.confirm('Discard this draft? This cannot be undone.')) return;
+        try {
+            await draftRequest('discard_draft', { id: activeDraftId });
+            window.location.href = 'sheet_picker.php';
+        } catch (error) {
+            if (templateLoadStatus) templateLoadStatus.textContent = 'Could not discard the draft. Please try again.';
+        }
+    });
+
+    document.getElementById('scoringForm').addEventListener('input', scheduleDraftSave);
+    document.getElementById('scoringForm').addEventListener('change', scheduleDraftSave);
+    document.getElementById('scoringForm').addEventListener('reset', () => {
+        if (draftSaveTimer) clearTimeout(draftSaveTimer);
+        draftSaveTimer = null;
+        if (!activeDraftId || draftIsReadOnly) return;
+        draftRequest('discard_draft', { id: activeDraftId }).catch(() => {
+            if (draftStatus) draftStatus.textContent = 'Could not discard draft';
+        });
+        activeDraftId = null;
+        draftDirty = false;
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') saveDraftNow(false, true);
+    });
+    window.addEventListener('pagehide', () => saveDraftNow(false, true));
+
+    async function initializeDraftFeatures() {
+        const params = new URLSearchParams(window.location.search);
+        const savedId = params.get('saved_id');
+        const shouldResume = params.get('resume_draft') === '1';
+        if (savedId) {
+            const data = await draftRequest('load', { id: savedId });
+            activeDraftId = Number(savedId);
+            await restoreStoredForm(data, true);
+            return;
+        }
+        if (shouldResume) {
+            const data = await draftRequest('get_draft');
+            if (data.draft) {
+                activeDraftId = data.draft.id;
+                await restoreStoredForm(data, false);
+            }
+            return;
+        }
+        if (OPENED_WITHOUT_POSITION) {
+            const data = await draftRequest('get_draft');
+            if (data.draft && data.prompt_allowed) {
+                activeDraftId = data.draft.id;
+                showResumePrompt(data.draft);
+            }
+        }
+    }
+
     competencyTemplateSelect.addEventListener('change', () => selectCompetencyTemplate(competencyTemplateSelect.value));
     salaryGradeSelect.addEventListener('change', () => {
         competencyTemplateSelect.value = '';
         competencyTemplateIdInput.value = '';
+        loadedTemplateMeta = null;
         templateLoadStatus.textContent = '';
         renderCustomCompetencies({ sections: {} });
         loadCompetencyTemplates().catch(error => {
@@ -1702,6 +2703,7 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
             }
             competencyTemplateSelect.value = '';
             competencyTemplateIdInput.value = '';
+            loadedTemplateMeta = null;
             templateLoadStatus.textContent = '';
             renderCustomCompetencies({ sections: {} });
             if (!IS_ADMIN && salaryGradeSelect.value !== '') {
@@ -1718,12 +2720,15 @@ $canSubmit = in_array(current_role(), ['admin', 'rater'], true);
         if (event.target.matches('[data-custom-rating], [data-custom-evidence]')) markEdited();
     });
 
-    applyStandardRows(selectedTemplateLayout);
-    if (salaryGradeSelect.value !== '') {
-        loadCompetencyTemplates().catch(error => {
-            templateLoadStatus.textContent = error.message;
+    applyFormLayout();
+    const initialTemplateLoad = salaryGradeSelect.value !== ''
+        ? loadCompetencyTemplates()
+        : Promise.resolve();
+    initialTemplateLoad
+        .then(initializeDraftFeatures)
+        .catch(error => {
+            if (templateLoadStatus) templateLoadStatus.textContent = error.message || 'Could not load this form.';
         });
-    }
 </script>
 
 </body>

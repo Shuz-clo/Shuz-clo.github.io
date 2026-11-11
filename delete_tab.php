@@ -12,7 +12,6 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_admin(true);
 require_once __DIR__ . '/Raters.php';
-require_once __DIR__ . '/Audit.php';
 
 function json_out(array $payload, int $code = 200): void {
     if (ob_get_length()) ob_clean();
@@ -74,11 +73,6 @@ try {
     $stmt->close();
 
     $conn->commit();
-
-    audit_log($conn, 0, 'delete', null, [
-        'office'            => $office,
-        'deletedCandidates' => (int)$deletedCandidates
-    ]);
 
     json_out(['status' => 'success', 'deletedCandidates' => max(0, (int)$deletedCandidates)]);
 } catch (Exception $e) {
