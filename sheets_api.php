@@ -7,6 +7,7 @@ ob_start();
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
+require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/sheets_schema.php';
 
 require_login(true);

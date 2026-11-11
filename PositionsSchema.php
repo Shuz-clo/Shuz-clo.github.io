@@ -1,15 +1,12 @@
 <?php
 
-const POSITIONS_SEED_VERSION = 2;
+const POSITIONS_SEED_VERSION = 4;
 
 const POSITIONS_SEED_CSV = <<<'CSV'
 Accountant I,12,
 Accountant II,16,
 Accountant III,19,B
 Accounting Analyst,11,
-Administrative Aide I,1,
-Administrative Aide III,3,
-Administrative Aide IV,4,
 Administrative Aide VI,6,
 Administrative Aide VI (Driver II),6,
 Administrative Assistant I,7,
@@ -40,17 +37,14 @@ Attorney III,21,B
 Attorney IV,23,B
 Attorney V,25,I
 Cartographer I,6,
-Cartographer II,8,
 Cartographer III,11,
 Cartographer IV,15,
 Chief Administrative Officer,24,I
 Chief Ecosystems Management Specialist,24,I
-Communication Development Officer I,11,
-Communication Development Officer II,15,
-Community Development Assistant II,3,
-Community Development Officer II,4,
 Community Environment & Natural Resources Officer,24,I
 Community Environment & Natural Resources Officer (CENRO),24,I
+Communication Development Officer I,11,
+Communication Development Officer II,15,
 Credit Officer I,9,
 Development Management Officer I,11,
 Development Management Officer II,15,
@@ -67,9 +61,6 @@ Engineer III (Geodetic Engineer),19,B
 Engineer IV (Geodetic Engineer),22,B
 Engineer V (Geodetic Engineer),24,I
 Engineering Aide,4,
-Forest Ranger,4,
-Forest Technician I,6,
-Forest Technician II,8,
 Forester I,11,
 Forester II,15,
 Forester III,18,B
@@ -78,7 +69,6 @@ Information Officer II,15,
 Information Systems Analyst I,12,
 Information Systems Analyst II,16,
 Information Systems Analyst III,19,B
-Laborer I,1,
 Land Management Inspector,6,
 Land Management Officer I,11,
 Land Management Officer II,15,
@@ -87,8 +77,6 @@ Legal Assistant II,12,
 Mathematician Aide I,6,
 Mathematician Aide II,8,
 Mathematician I,10,
-Park Attendant II,4,
-Park Maintenance Foreman,8,
 Park Operation Superintendent IV,22,
 Park Operation Superintendent V,24,
 Planning Officer I,11,
@@ -99,8 +87,7 @@ Planning Officer V,24,I
 Project Evaluation Officer I,11,
 Project Evaluation Officer II,15,
 Project Evaluation Officer III,18,B
-Provincial Environment & Natural Resources Officer,26,I
-Scaler,5,
+Provincial Environment & Natural Resources Officer,26,
 Senior Communications Development Officer,18,B
 Senior Ecosystems Management Specialist,18,B
 Special Investigator I,11,
@@ -109,8 +96,6 @@ Statistician II,15,
 Supervising Administrative Officer,22,B
 Supervising Ecosystems Management Specialist,22,B
 Tracer,3,
-Tree Marker,2,
-Utility Worker I,1,
 Zoology Technician,6,
 CSV;
 
@@ -192,10 +177,25 @@ function ensure_positions_schema(mysqli $conn): void {
         }
 
         if ((int)$versionRow['seed_version'] < POSITIONS_SEED_VERSION) {
+            $scope = 'REGIONAL_OFFICE';
+            $allowedTitles = array_fill_keys(array_column($seedRows, 'title'), true);
+            $existingStmt = $conn->prepare('SELECT id, title FROM positions WHERE office_scope = ?');
+            $existingStmt->bind_param('s', $scope);
+            $existingStmt->execute();
+            $existingPositions = $existingStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $existingStmt->close();
+            $deleteStmt = $conn->prepare('DELETE FROM positions WHERE id = ? AND office_scope = ?');
+            foreach ($existingPositions as $existingPosition) {
+                if (isset($allowedTitles[(string)$existingPosition['title']])) continue;
+                $positionId = (int)$existingPosition['id'];
+                $deleteStmt->bind_param('is', $positionId, $scope);
+                $deleteStmt->execute();
+            }
+            $deleteStmt->close();
+
             $stmt = $conn->prepare("INSERT INTO positions (office_scope, title, salary_grade, leadership_level)
                 VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE salary_grade = VALUES(salary_grade), leadership_level = VALUES(leadership_level)");
-            $scope = 'REGIONAL_OFFICE';
             foreach ($seedRows as $position) {
                 $title = $position['title'];
                 $salaryGrade = $position['salary_grade'];

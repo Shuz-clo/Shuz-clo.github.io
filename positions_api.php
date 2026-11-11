@@ -5,6 +5,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/PositionsSchema.php';
+require_once __DIR__ . '/OfficeTypeMap.php';
 
 function positions_json_out(array $payload, int $status = 200): void {
     if (ob_get_length()) ob_clean();
@@ -46,15 +47,39 @@ if ($method === 'GET') {
     }
 
     try {
+        $isAdmin = current_role() === 'admin';
+        $accountType = null;
+        $allowedOfficeTypes = ['RO', 'FO'];
+        if (!$isAdmin) {
+            $profile = find_user_access_profile($conn, (int)current_user_id());
+            $accountType = account_type_for_profile($profile);
+            $allowedOfficeTypes = office_types_for_account_type($accountType);
+            if (!$allowedOfficeTypes) {
+                positions_json_out(['status' => 'error', 'message' => 'Your account has no assigned account type. Ask an administrator to update your access profile.'], 403);
+            }
+        }
+
+        $positions = [];
+        if ($scope === 'REGIONAL_OFFICE' && in_array('RO', $allowedOfficeTypes, true)) {
         $stmt = $conn->prepare('SELECT title, salary_grade, leadership_level FROM positions WHERE office_scope = ? ORDER BY salary_grade DESC, title ASC');
         $stmt->bind_param('s', $scope);
         $stmt->execute();
-        $positions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $regionalPositions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
-        foreach ($positions as &$position) {
+        foreach ($regionalPositions as &$position) {
             $position['salary_grade'] = (int)$position['salary_grade'];
+            $position['office_type'] = 'RO';
         }
         unset($position);
+        array_push($positions, ...$regionalPositions);
+        }
+        if ($scope === 'REGIONAL_OFFICE' && in_array('FO', $allowedOfficeTypes, true)) {
+            foreach (field_positions_by_sheet() as $position) {
+                $position['salary_grade'] = null;
+                $position['leadership_level'] = null;
+                $positions[] = $position;
+            }
+        }
         positions_json_out(['status' => 'success', 'positions' => $positions]);
     } catch (Throwable $e) {
         error_log('Positions API list failed: ' . $e->getMessage());

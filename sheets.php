@@ -5,6 +5,9 @@ require_once 'auth.php';
 require_once __DIR__ . '/Raters.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/sheets_schema.php';
+require_once __DIR__ . '/AccessGroups.php';
+require_once __DIR__ . '/PositionsSchema.php';
+require_once __DIR__ . '/OfficeTypeMap.php';
 
 ensure_auth_schema($conn);
 ensure_sheets_schema($conn);
@@ -21,6 +24,8 @@ foreach (leadership_level_map() as $compact => $lvl) {
     $leadMap[$compact] = $lvl;
 }
 $leadMapJson = json_encode($leadMap, JSON_UNESCAPED_UNICODE);
+$defaultLeadershipRowsJson = json_encode(leadership_rows_for_level('B'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+$advancedLeadershipRowsJson = json_encode(leadership_rows_for_level('I'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 $allPositions = array_merge(array_keys(leadership_level_titles()), [
     'Administrative Aide I','Administrative Aide III','Administrative Aide IV','Administrative Aide VI',
@@ -48,6 +53,22 @@ $allPositions = array_merge(array_keys(leadership_level_titles()), [
     'Supervising Administrative Officer','Supervising Ecosystems Management Specialist',
     'Tracer','Tree Marker','Utility Worker I','Zoology Technician',
 ]);
+  if (current_role() === 'rater') {
+    $positionProfile = find_user_access_profile($conn, (int)current_user_id());
+    $positionAccountType = account_type_for_profile($positionProfile);
+    if ($positionAccountType === 'field') {
+      $allPositions = array_values(array_unique(array_column(field_positions_by_sheet(), 'title')));
+    } elseif ($positionAccountType === 'region') {
+      $positionScope = 'REGIONAL_OFFICE';
+      $positionStmt = $conn->prepare('SELECT title FROM positions WHERE office_scope = ? ORDER BY salary_grade DESC, title ASC');
+      $positionStmt->bind_param('s', $positionScope);
+      $positionStmt->execute();
+      $allPositions = array_column($positionStmt->get_result()->fetch_all(MYSQLI_ASSOC), 'title');
+      $positionStmt->close();
+    } else {
+      $allPositions = [];
+    }
+  }
 $allPositionsJson = json_encode($allPositions, JSON_UNESCAPED_UNICODE);
 
 $offices = ['PENRO Iloilo','PENRO Capiz','PENRO Aklan','PENRO Antique','PENRO Guimaras','PENRO Negros Occidental','Regional Office'];
@@ -63,6 +84,8 @@ $todayDate = date('F j, Y');
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="chrome" content="nofill">
 <title>Sheets Dashboard</title>
+<link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+<script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
 <style>
   :root { --bg:#f8f9fa; --rail:#0d0d0d; --accent:#6ea8fe; --blue:#2b579a; }
   * { box-sizing: border-box; }
@@ -238,6 +261,8 @@ $todayDate = date('F j, Y');
   const ALL_POSITIONS = <?php echo $allPositionsJson; ?>;
   const OFFICES       = <?php echo $officesJson; ?>;
   const LEAD_MAP      = <?php echo $leadMapJson; ?>;
+  const LEADERSHIP_ROWS_BASIC = <?php echo $defaultLeadershipRowsJson; ?>;
+  const LEADERSHIP_ROWS_ADVANCED = <?php echo $advancedLeadershipRowsJson; ?>;
   const INIT_EVIDENCE = <?php echo $evidenceOptionsJson; ?>;
   const TODAY_DATE    = <?php echo json_encode($todayDate); ?>;
 
@@ -268,8 +293,6 @@ $todayDate = date('F j, Y');
     'INFOSA1':'Information Systems Analyst I','INFOSA2':'Information Systems Analyst II','INFOSA3':'Information Systems Analyst III',
     'CGR1':'Cartographer I','CGR2':'Cartographer II','CGR3':'Cartographer III','CGR4':'Cartographer IV'
   };
-
-  const LEADERSHIP_HIDDEN_POSITIONS = ['SVEMS', 'SUPERVISING ECOSYSTEMS MANAGEMENT SPECIALIST'];
 
   let currentSheetId    = null;
   let layoutData        = null;
@@ -403,13 +426,47 @@ $todayDate = date('F j, Y');
   }
 
   function applyLeadership() {
-    document.querySelectorAll('.leadership-row').forEach(function (row) {
-      const posInput = row.closest('.denr-form').querySelector('.f-position-title');
+    document.querySelectorAll('.denr-form').forEach(function (form) {
+      const posInput = form.querySelector('.f-position-title');
       const pos = posInput ? posInput.value.trim() : '';
       const level = leadershipLevelFor(pos);
-      const noLead = (pos === '') || LEADERSHIP_HIDDEN_POSITIONS.indexOf(pos.toUpperCase()) !== -1 || (level === null);
-      row.style.display = noLead ? 'none' : '';
+      const noLead = level !== 'B' && level !== 'I';
+      form.querySelectorAll('.leadership-row').forEach(function (row) {
+        row.style.display = noLead ? 'none' : '';
+      });
+      if (noLead) return;
+
+      const leadershipRows = level === 'I' ? LEADERSHIP_ROWS_ADVANCED : LEADERSHIP_ROWS_BASIC;
+      const titles = form.querySelectorAll('.row-title[data-section="lead"]');
+      const descriptions = form.querySelectorAll('tr[data-section="lead"] .row-desc');
+      leadershipRows.forEach(function (leadershipRow, index) {
+        const title = titles[index];
+        const desc = descriptions[index];
+        if (title) title.value = leadershipRow.title;
+        if (desc) {
+          desc.value = leadershipRow.desc;
+          autosize(desc);
+        }
+      });
+      const levelLabel = form.querySelector('.leadership-level-label');
+      if (levelLabel) levelLabel.textContent = level === 'I' ? 'Advanced' : 'Basic';
     });
+  }
+
+  function leadershipRowsForLevel(level, rows) {
+    if (level !== 'B' && level !== 'I') return rows || [];
+    const canonicalRows = level === 'I' ? LEADERSHIP_ROWS_ADVANCED : LEADERSHIP_ROWS_BASIC;
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const standardIds = new Set(canonicalRows.map(function (row) { return row.id; }));
+    const standardRows = canonicalRows.map(function (canonicalRow) {
+      const existing = sourceRows.find(function (row) { return row.id === canonicalRow.id; });
+      return existing
+        ? Object.assign({}, existing, { title: canonicalRow.title, desc: canonicalRow.desc })
+        : Object.assign({}, canonicalRow);
+    });
+    return standardRows.concat(sourceRows.filter(function (row) {
+      return !standardIds.has(row.id);
+    }));
   }
 
   function renderPositionDropdown(inputEl, dropdownEl, filter) {
@@ -558,7 +615,7 @@ $todayDate = date('F j, Y');
     el.className = secClass;
     el.innerHTML = ''
       + '<th class="sec-header" style="text-align:center; vertical-align:middle;">' + esc(label) + '</th>'
-      + '<th class="sec-header" style="text-align:center; vertical-align:middle;">' + esc(defaultLevel) + '</th>'
+      + '<th class="sec-header' + (isLead ? ' leadership-level-label' : '') + '" style="text-align:center; vertical-align:middle;">' + esc(defaultLevel) + '</th>'
       + '<th class="sec-header" style="text-align:center; vertical-align:middle;">Rating</th>';
     tb.appendChild(el);
 
@@ -589,12 +646,19 @@ $todayDate = date('F j, Y');
     tb.insertAdjacentHTML('beforeend', headerRowHtml(blockData.candidate_name, blockData.position_title, officeName, blockData.interview_date));
 
     const order    = ['core', 'org', 'lead', 'func'];
-    const defaults = { core:'Evidence', org:'Advanced', lead:'Basic', func:'Advanced' };
+    const defaults = { core:'Basic', org:'Advanced', lead:'Basic', func:'Advanced' };
+    const leadershipLevel = leadershipLevelFor(blockData.position_title || '');
 
     order.forEach(function (key) {
       if (!layoutData.sections[key]) return;
       const sec = layoutData.sections[key];
-      buildSection(tb, key, sec.label || key, sec.rows || [], defaults[key]);
+      const rows = key === 'lead'
+        ? leadershipRowsForLevel(leadershipLevel, sec.rows)
+        : (sec.rows || []);
+      const levelLabel = key === 'lead'
+        ? (leadershipLevel === 'I' ? 'Advanced' : (leadershipLevel === 'B' ? 'Basic' : defaults[key]))
+        : defaults[key];
+      buildSection(tb, key, sec.label || key, rows, levelLabel);
     });
 
     buildFooter(tb);
@@ -607,6 +671,13 @@ $todayDate = date('F j, Y');
   }
 
   function renderTabsAndTables() {
+    if (typeof window.runUITransition === 'function') {
+      return window.runUITransition(renderTabsAndTablesNow, 'sheet-forward');
+    }
+    return renderTabsAndTablesNow();
+  }
+
+  function renderTabsAndTablesNow() {
     const tabsBar = $('tabs-bar');
     const containerWrapper = $('tablesContainerWrapper');
     if (!tabsBar || !containerWrapper) return;
@@ -705,13 +776,7 @@ $todayDate = date('F j, Y');
           { id:'oc4', title:'OC4 - PROJECT MANAGEMENT', desc: 'Leads in project management activities' },
           { id:'oc5', title:'OC5 - COMPLETE STAFF WORK (CSW)', desc: 'Leads the practice of CSW in his/her office/unit' }
         ]},
-        lead: { label: 'Leadership Competencies', rows: [
-          { id:'lc1', title:'LC1 – STRATEGIC LEADERSHIP (THINKING STRATEGICALLY AND CREATIVELY)', desc: 'Develops office/ service’s strategies and plans based on the DENR’s mission/vision' },
-          { id:'lc2', title:'LC2 – LEADING CHANGE', desc: 'Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation' },
-          { id:'lc3', title:'LC3 – PEOPLE DEVELOPMENT (CREATING AND NURTURING A HIGH PERFORMING ORGANIZATION)', desc: 'Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals' },
-          { id:'lc4', title:'LC4 – PEOPLE PERFORMANCE MANAGEMENT (MANAGING PERFORMANCE AND COACHING FOR RESULTS)', desc: 'Leads in project management activities' },
-          { id:'lc5', title:'LC5 – PARTNERSHSIP AND NETWORKING (BUILDING COLLABORATIVE AND INCLUSIVE WORKING RELATIONSHIPS)', desc: 'Leads the practice of CSW in his/her office/unit' }
-        ]},
+        lead: { label: 'Leadership Competencies', rows: <?php echo $defaultLeadershipRowsJson; ?> },
         func: { label: 'Functional Competencies', rows: [
           { id:'pco1', title:'PCO1 – CONCEPT AND APPLICATION OF INTEGRATED ECOSYSTEMS MANAGEMENT (IEM)', desc: 'Applies IEM and other related approaches to NRM' },
           { id:'pco2', title:'PCO2 – IDENTIFICATION OF INTERVENTIONS AND INTEGRATING STRATEGIES ACROSS (FORESTRY, COASTAL, AGRICULTURE, URBAN, AIR PACE) AND ZONING FOR STRATEGIC MANAGEMENT', desc: 'Identifies interventions and integrating strategies across sectors' },
@@ -872,16 +937,24 @@ $todayDate = date('F j, Y');
   }
 
   function showHome() {
-    const ed = $('editorView'); const hm = $('homeView');
-    if (ed) ed.style.display = 'none';
-    if (hm) hm.style.display = 'block';
     currentSheetId = null;
+    const updateView = () => {
+      const ed = $('editorView'); const hm = $('homeView');
+      if (ed) ed.style.display = 'none';
+      if (hm) hm.style.display = 'block';
+    };
+    if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+    else updateView();
     loadList();
   }
   function showEditor() {
-    const ed = $('editorView'); const hm = $('homeView');
-    if (hm) hm.style.display = 'none';
-    if (ed) ed.style.display = 'flex';
+    const updateView = () => {
+      const ed = $('editorView'); const hm = $('homeView');
+      if (hm) hm.style.display = 'none';
+      if (ed) ed.style.display = 'flex';
+    };
+    if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+    else updateView();
   }
 
   async function loadList() {

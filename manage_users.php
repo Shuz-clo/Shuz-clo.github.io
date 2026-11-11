@@ -15,7 +15,6 @@ require_once __DIR__ . '/bootstrap.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
-require_once __DIR__ . '/Audit.php';
 require_once __DIR__ . '/AccessGroups.php';
 require_once __DIR__ . '/Raters.php';
 
@@ -209,9 +208,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt->close();
                         revoke_user_tokens($conn, $id);
                         $conn->commit();
-                        audit_log($conn, 0, 'role_change',
-                            ['user_id' => $id, 'username' => $target['username'], 'role' => $target['role']],
-                            ['user_id' => $id, 'username' => $target['username'], 'role' => $role]);
                         flash('success', "'" . $target['username'] . "' is now $role. It applies at their next login.");
                     }
                 } catch (Throwable $e) {
@@ -236,8 +232,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute();
                 $stmt->close();
                 revoke_user_tokens($conn, $id);
-                audit_log($conn, 0, 'password_reset', null, ['user_id' => $id, 'username' => $target['username']]);
                 flash('success', "Password updated for '" . $target['username'] . "'.");
+            }
+
+        } elseif ($action === 'approve_password_reset' || $action === 'reject_password_reset') {
+            $requestId = (int)($_POST['request_id'] ?? 0);
+            $stmt = $conn->prepare("SELECT pr.id, pr.user_id, u.username, u.role
+                FROM password_reset_requests pr
+                JOIN users u ON u.id = pr.user_id
+                WHERE pr.id = ? AND pr.status = 'pending'
+                LIMIT 1");
+            $stmt->bind_param('i', $requestId);
+            $stmt->execute();
+            $request = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            if (!$request || $request['role'] !== 'rater') {
+                flash('error', 'That password request is no longer available.');
+            } elseif ($action === 'reject_password_reset') {
+                $stmt = $conn->prepare("UPDATE password_reset_requests
+                    SET status = 'rejected', reviewed_by = ?
+                    WHERE id = ? AND status = 'pending'");
+                $stmt->bind_param('ii', $myId, $requestId);
+                $stmt->execute();
+                $changed = $stmt->affected_rows;
+                $stmt->close();
+                flash($changed === 1 ? 'success' : 'error', $changed === 1
+                    ? 'Password request rejected.'
+                    : 'That password request was already handled.');
+            } else {
+                $resetCode = bin2hex(random_bytes(32));
+                $resetCodeHash = hash('sha256', $resetCode);
+                $stmt = $conn->prepare("UPDATE password_reset_requests
+                    SET status = 'approved', token_hash = ?, approved_at = NOW(),
+                        expires_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), reviewed_by = ?
+                    WHERE id = ? AND status = 'pending'");
+                $stmt->bind_param('sii', $resetCodeHash, $myId, $requestId);
+                $stmt->execute();
+                $changed = $stmt->affected_rows;
+                $stmt->close();
+                if ($changed === 1) {
+                    $_SESSION['password_reset_approval_code'] = [
+                        'username' => $request['username'],
+                        'code' => $resetCode,
+                    ];
+                    flash('success', 'Request approved. Give the one-time code below to the rater; it expires in 24 hours.');
+                } else {
+                    flash('error', 'That password request was already handled.');
+                }
             }
 
         } elseif ($action === 'delete') {
@@ -267,8 +309,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt->execute();
                         $stmt->close();
                         $conn->commit();
-                        audit_log($conn, 0, 'delete',
-                            ['user_id' => $id, 'username' => $target['username']], null);
                         flash('success', "Account '" . $target['username'] . "' deleted.");
                     }
                 } catch (Throwable $e) {
@@ -304,6 +344,17 @@ while ($row = $res->fetch_assoc()) {
     $candidateRecords[] = $row;
 }
 $csrf = csrf_token();
+$approvedResetCode = $_SESSION['password_reset_approval_code'] ?? null;
+unset($_SESSION['password_reset_approval_code']);
+$pendingPasswordResets = [];
+$res = $conn->query("SELECT pr.id, u.username, pr.requested_at
+    FROM password_reset_requests pr
+    JOIN users u ON u.id = pr.user_id
+    WHERE pr.status = 'pending' AND u.role = 'rater'
+    ORDER BY pr.requested_at ASC");
+while ($row = $res->fetch_assoc()) {
+    $pendingPasswordResets[] = $row;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -311,86 +362,54 @@ $csrf = csrf_token();
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Users</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="mockup.css?v=<?php echo filemtime(__DIR__ . '/mockup.css'); ?>">
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
-        :root {
-            --primary: #107c41;
-            --primary-dark: #0b5c30;
-            --danger: #c0392b;
-            --danger-dark: #962d22;
-        }
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(135deg, #f4f6f9 0%, #e8ecf1 100%);
-            margin: 0;
-            padding: 24px 16px;
-            color: #1a1a1a;
-        }
-        .wrap { max-width: 980px; margin: 0 auto; }
-        .topbar {
-            display: flex; justify-content: space-between; align-items: center;
-            flex-wrap: wrap; gap: 10px; margin-bottom: 18px;
-        }
-        .topbar h1 { margin: 0; font-size: 22px; }
-        .topbar .nav a {
-            font-size: 13px; color: #555; text-decoration: none; margin-left: 14px;
-        }
-        .topbar .nav a:hover { color: var(--primary); text-decoration: underline; }
-        .card {
-            background: #fff; border-radius: 14px; padding: 22px 24px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.08); margin-bottom: 20px;
-        }
-        .card h2 { margin: 0 0 14px; font-size: 16px; }
-        .alert {
-            padding: 10px 14px; border-radius: 8px; font-size: 13px;
-            margin-bottom: 18px; border: 1px solid transparent;
-        }
+        .alert { padding: 10px 14px; border: 1px solid transparent; border-radius: 8px; margin-bottom: 18px; font-size: 13px; }
         .alert-success { background: #e8f5e9; border-color: #a9d08e; color: #1e5e2a; }
-        .alert-error   { background: #fdecea; border-color: #f5c2c0; color: #7a1f16; }
-        .add-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-        .add-form .f { flex: 1 1 180px; }
-        label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333; }
-        input[type="text"], input[type="password"], select {
-            width: 100%; padding: 9px 10px; border: 1px solid #d5d9e0;
-            border-radius: 8px; font-size: 14px; background: #fff;
-        }
-        input:focus, select:focus {
-            outline: none; border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(16,124,65,0.12);
-        }
-        .hint { font-size: 12px; color: #777; margin: 10px 0 0; }
-        button {
-            padding: 9px 16px; border: none; border-radius: 8px; font-size: 13px;
-            font-weight: 600; cursor: pointer; background: var(--primary); color: #fff;
-        }
-        button:hover { background: var(--primary-dark); }
-        button.danger { background: var(--danger); }
-        button.danger:hover { background: var(--danger-dark); }
-        button.small { padding: 7px 12px; }
-        .table-scroll { overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eef0f4; vertical-align: middle; }
-        th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #777; }
-        .inline { display: flex; gap: 6px; align-items: center; }
+        .alert-error { background: #fdecea; border-color: #f5c2c0; color: #7a1f16; }
+        .inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
         .inline input, .inline select { width: auto; min-width: 120px; padding: 7px 8px; font-size: 13px; }
-        .badge {
-            display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px;
-            border-radius: 20px; background: #e8ecf1; color: #444; margin-left: 6px;
+        #manageUsersPage { width: min(100%, 1400px); max-width: 1400px; }
+        #manageUsersPage .topbar { align-items: center; flex-wrap: wrap; }
+        #manageUsersPage .topbar h1 { margin: 0; }
+        #manageUsersPage .nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        #manageUsersPage .create-account-form,
+        #manageUsersPage .link-candidate-form { display: grid; align-items: end; gap: 12px; }
+        #manageUsersPage .create-account-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        #manageUsersPage .link-candidate-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        #manageUsersPage .add-form > .f { min-width: 0; margin: 0; }
+        #manageUsersPage .add-form > button { justify-self: start; }
+        #manageUsersPage .create-account-form > button { grid-column: 1 / -1; }
+        #manageUsersPage .table-scroll { border: 1px solid var(--ln); border-radius: 8px; }
+        #manageUsersPage #accountsTable { min-width: 1080px; }
+        #manageUsersPage .role-form { flex-wrap: nowrap; }
+        #manageUsersPage .role-form select { width: 130px; min-width: 0; }
+        #manageUsersPage .access-profile-form { display: grid; grid-template-columns: minmax(155px, 1.15fr) minmax(135px, 1fr) minmax(76px, .55fr) auto; align-items: center; gap: 6px; }
+        #manageUsersPage .access-profile-form input,
+        #manageUsersPage .access-profile-form select { width: 100%; min-width: 0; }
+        #manageUsersPage .access-profile-form button { justify-self: start; }
+        @media (max-width: 760px) {
+            #manageUsersPage .topbar { align-items: flex-start; }
+            #manageUsersPage .nav { width: 100%; }
+            #manageUsersPage .create-account-form,
+            #manageUsersPage .link-candidate-form { grid-template-columns: minmax(0, 1fr); }
+            #manageUsersPage .create-account-form > button { grid-column: auto; }
         }
-        .badge.you { background: #e8f5e9; color: #1e5e2a; }
-        .muted { color: #999; font-size: 12px; }
         @media print { .no-print { display: none; } }
     </style>
 </head>
 <body>
-<div class="wrap">
-    <div class="topbar">
+<div class="wrap pg" id="manageUsersPage">
+    <div class="topbar ph">
         <h1>Manage Users</h1>
-        <div class="nav no-print">
-            <a href="results_2.php">&larr; Results</a>
-            <a href="audit_viewer.php">Score Audit</a>
-            <a href="bulk_users.php">Bulk Users</a>
-            <a href="logout.php">Log out (<?php echo h($_SESSION['username'] ?? ''); ?>)</a>
+        <div class="nav ag no-print">
+            <a class="btn" href="results_2.php">&larr; Results</a>
+            <a class="btn" href="bulk_users.php">Bulk Users</a>
+            <a class="btn d" href="logout.php">Log out (<?php echo h($_SESSION['username'] ?? ''); ?>)</a>
         </div>
     </div>
 
@@ -400,22 +419,59 @@ $csrf = csrf_token();
         </div>
     <?php endif; ?>
 
-    <div class="card">
+    <?php if (is_array($approvedResetCode) && isset($approvedResetCode['username'], $approvedResetCode['code'])): ?>
+        <div class="alert alert-success">
+            One-time password reset code for <strong><?php echo h($approvedResetCode['username']); ?></strong>:
+            <code><?php echo h($approvedResetCode['code']); ?></code>
+            <br>Give this code to the rater securely. It can only be used once and expires in 24 hours.
+            <a href="password_reset.php">Password reset page</a>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($pendingPasswordResets): ?>
+        <div class="cd">
+            <h2>Pending rater password requests</h2>
+            <p class="hint mu">Approving generates a one-time code for the rater to set a new password. The new password is never shown to the admin.</p>
+            <div class="table-scroll tbl">
+                <table>
+                    <thead><tr><th>Username</th><th>Requested</th><th class="no-print">Action</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($pendingPasswordResets as $request): ?>
+                        <tr>
+                            <td><?php echo h($request['username']); ?></td>
+                            <td><?php echo h($request['requested_at']); ?></td>
+                            <td class="no-print">
+                                <form method="POST" action="manage_users.php" class="inline">
+                                    <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
+                                    <input type="hidden" name="request_id" value="<?php echo (int)$request['id']; ?>">
+                                    <button type="submit" name="action" value="approve_password_reset" class="btn sm">Approve</button>
+                                    <button type="submit" name="action" value="reject_password_reset" class="btn sm d">Reject</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <div class="cd">
         <h2>Add a new account</h2>
-        <form method="POST" action="manage_users.php" class="add-form" autocomplete="off">
+        <form method="POST" action="manage_users.php" class="add-form r2 create-account-form" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
             <input type="hidden" name="action" value="create">
-            <div class="f">
+            <div class="f fl">
                 <label for="new_username">Username</label>
                 <input type="text" id="new_username" name="username" required pattern="[\p{L}0-9 .\-]{3,100}" title="3 to 100 characters: letters (including ñ), numbers, spaces, dots, and hyphens." autocomplete="off">
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="new_password">Password</label>
                 <input type="password" id="new_password" name="password" required
                        minlength="<?php echo MIN_PASSWORD_LENGTH; ?>" maxlength="<?php echo MAX_PASSWORD_LENGTH; ?>"
                        autocomplete="new-password">
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="new_role">Role</label>
                 <select id="new_role" name="role" required>
                     <option value="rater">Rater</option>
@@ -423,7 +479,7 @@ $csrf = csrf_token();
                     <option value="admin">Admin</option>
                 </select>
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="new_region">Region</label>
                 <select id="new_region" name="region" required>
                     <option value="">-- Select region --</option>
@@ -432,7 +488,7 @@ $csrf = csrf_token();
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="new_field">Field</label>
                 <select id="new_field" name="field_name" required>
                     <option value="">-- Select field --</option>
@@ -442,7 +498,7 @@ $csrf = csrf_token();
                 </select>
                 <input type="text" name="field_other" maxlength="100" placeholder="Enter field name" aria-label="Other field name" hidden>
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="new_salary_grade">Salary grade</label>
                 <select id="new_salary_grade" name="salary_grade" required <?php echo $salaryGrades ? '' : 'disabled'; ?>>
                     <option value="">-- Select salary grade --</option>
@@ -450,24 +506,24 @@ $csrf = csrf_token();
                         <option value="<?php echo $grade; ?>"><?php echo $grade; ?></option>
                     <?php endforeach; ?>
                 </select>
-                <?php if (!$salaryGrades): ?><span class="muted">No Regional Office salary grades exist. Seed or import positions first.</span><?php endif; ?>
+                <?php if (!$salaryGrades): ?><span class="muted mu">No Regional Office salary grades exist. Seed or import positions first.</span><?php endif; ?>
             </div>
-            <button type="submit">Create account</button>
+            <button type="submit" class="btn p">Create account</button>
         </form>
 
-        <p class="hint">
+        <p class="hint mu">
             Passwords: <?php echo MIN_PASSWORD_LENGTH; ?>-<?php echo MAX_PASSWORD_LENGTH; ?> characters.
             Give the username and password to the person yourself. Passwords can't be viewed later, only reset.
         </p>
     </div>
 
-    <div class="card">
+    <div class="cd">
         <h2>Link candidate records to Standard User accounts</h2>
-        <p class="hint">Standard Users can only see candidate records explicitly linked to their account. Existing records are not matched automatically by name.</p>
-        <form method="POST" action="manage_users.php" class="add-form" autocomplete="off">
+        <p class="hint mu">Standard Users can only see candidate records explicitly linked to their account. Existing records are not matched automatically by name.</p>
+        <form method="POST" action="manage_users.php" class="add-form r2 link-candidate-form" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
             <input type="hidden" name="action" value="link_candidate">
-            <div class="f">
+            <div class="f fl">
                 <label for="candidate_link_user">Standard User account</label>
                 <select id="candidate_link_user" name="user_id" required>
                     <option value="">-- Select account --</option>
@@ -476,7 +532,7 @@ $csrf = csrf_token();
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="f">
+            <div class="f fl">
                 <label for="candidate_link_record">Candidate record</label>
                 <select id="candidate_link_record" name="candidate_id" required>
                     <option value="">-- Select candidate --</option>
@@ -490,12 +546,12 @@ $csrf = csrf_token();
                     <?php endforeach; ?>
                 </select>
             </div>
-            <button type="submit">Link record</button>
+            <button type="submit" class="btn p">Link record</button>
         </form>
         <?php if (!$candidateRecords): ?>
-            <p class="hint">No candidate records are available to link yet.</p>
+            <p class="hint mu">No candidate records are available to link yet.</p>
         <?php endif; ?>
-        <div class="table-scroll">
+        <div class="table-scroll tbl">
             <table>
                 <thead><tr><th>Candidate record</th><th>Linked account</th><th class="no-print"></th></tr></thead>
                 <tbody>
@@ -508,7 +564,7 @@ $csrf = csrf_token();
                                 <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
                                 <input type="hidden" name="action" value="unlink_candidate">
                                 <input type="hidden" name="candidate_id" value="<?php echo (int)$candidate['id']; ?>">
-                                <button type="submit" class="small danger">Unlink</button>
+                                <button type="submit" class="btn sm d">Unlink</button>
                             </form>
                         </td>
                     </tr>
@@ -518,10 +574,10 @@ $csrf = csrf_token();
         </div>
     </div>
 
-    <div class="card">
+    <div class="cd">
         <h2>Accounts (<?php echo count($users); ?>)</h2>
-        <div class="table-scroll">
-            <table>
+        <div class="table-scroll tbl">
+            <table id="accountsTable">
                 <thead>
                     <tr>
                         <th>Username</th>
@@ -537,13 +593,13 @@ $csrf = csrf_token();
                     <tr>
                         <td>
                             <?php echo h($u['username']); ?>
-                            <?php if ($isMe): ?><span class="badge you">you</span><?php endif; ?>
+                            <?php if ($isMe): ?><span class="badge bd you">you</span><?php endif; ?>
                         </td>
                         <td>
                             <?php if ($isMe): ?>
-                                <?php echo h($u['role']); ?> <span class="muted">(can't change own)</span>
+                                <?php echo h($u['role']); ?> <span class="muted mu">(can't change own)</span>
                             <?php else: ?>
-                                <form method="POST" action="manage_users.php" class="inline">
+                                <form method="POST" action="manage_users.php" class="inline role-form">
                                     <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
                                     <input type="hidden" name="action" value="change_role">
                                     <input type="hidden" name="id" value="<?php echo (int)$u['id']; ?>">
@@ -554,12 +610,12 @@ $csrf = csrf_token();
                                             </option>
                                         <?php endforeach; ?>
                                     </select>
-                                    <button type="submit" class="small">Save</button>
+                                    <button type="submit" class="btn sm">Save</button>
                                 </form>
                             <?php endif; ?>
                         </td>
                         <td>
-                            <form method="POST" action="manage_users.php" class="inline">
+                            <form method="POST" action="manage_users.php" class="inline access-profile-form">
                                 <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
                                 <input type="hidden" name="action" value="update_access_profile">
                                 <input type="hidden" name="id" value="<?php echo (int)$u['id']; ?>">
@@ -584,7 +640,7 @@ $csrf = csrf_token();
                                         <option value="<?php echo $grade; ?>" <?php echo (string)$u['salary_grade'] === (string)$grade ? 'selected' : ''; ?>><?php echo $grade; ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <button type="submit" class="small">Save</button>
+                                <button type="submit" class="btn sm">Save</button>
                             </form>
                         </td>
                         <td>
@@ -595,10 +651,10 @@ $csrf = csrf_token();
                                 <input type="password" name="password" placeholder="New password" required
                                        minlength="<?php echo MIN_PASSWORD_LENGTH; ?>" maxlength="<?php echo MAX_PASSWORD_LENGTH; ?>"
                                        autocomplete="new-password">
-                                <button type="submit" class="small">Reset</button>
+                                <button type="submit" class="btn sm">Reset</button>
                             </form>
                         </td>
-                        <td class="muted"><?php echo h($u['created_at']); ?></td>
+                        <td class="muted mu"><?php echo h($u['created_at']); ?></td>
                         <td class="no-print">
                             <?php if (!$isMe): ?>
                                 <form method="POST" action="manage_users.php"
@@ -606,14 +662,14 @@ $csrf = csrf_token();
                                     <input type="hidden" name="csrf_token" value="<?php echo h($csrf); ?>">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="id" value="<?php echo (int)$u['id']; ?>">
-                                    <button type="submit" class="small danger">Delete</button>
+                                    <button type="submit" class="btn sm d">Delete</button>
                                 </form>
                             <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 <?php if (empty($users)): ?>
-                    <tr><td colspan="6" class="muted">No accounts yet.</td></tr>
+                    <tr><td colspan="7" class="muted mu">No accounts yet.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

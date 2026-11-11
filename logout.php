@@ -4,15 +4,6 @@ require_once 'auth.php';
 require_once __DIR__ . '/config.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
-require_once __DIR__ . '/Audit.php';
-
-if (is_logged_in()) {
-    audit_log($conn, 0, 'logout',
-        null,
-        ['user_id' => current_user_id(), 'username' => $_SESSION['username'] ?? null]
-    );
-}
-
 if (!empty($_COOKIE['remember_admin'])) {
     delete_remember_token($conn, $_COOKIE['remember_admin']);
 }

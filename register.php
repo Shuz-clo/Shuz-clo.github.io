@@ -5,7 +5,6 @@ require_once 'auth.php';
 require_once __DIR__ . '/config.php';
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
-require_once __DIR__ . '/Audit.php';
 require_once __DIR__ . '/AccessGroups.php';
 
 if (is_logged_in()) {
@@ -90,14 +89,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role, region, field_name, salary_grade) VALUES (?, ?, ?, ?, ?, ?)");
             $stmt->bind_param('sssssi', $username, $hash, $role, $region, $fieldName, $salaryGrade);
             $stmt->execute();
-            $newUserId = $conn->insert_id;
             $stmt->close();
 
             unset($_SESSION['csrf_token']);
-            audit_log($conn, 0, 'role_change',
-                null,
-                ['user_id' => $newUserId, 'username' => $username, 'role' => $role, 'via' => 'self_register']
-            );
             flash_set('success', 'Account created successfully! Please sign in.');
             header('Location: login.php');
             exit;
@@ -118,74 +112,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign Up</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="mockup.css?v=<?php echo filemtime(__DIR__ . '/mockup.css'); ?>">
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
-        :root {
-            --primary: #107c41;
-            --primary-dark: #0b5c30;
-            --error-bg: #fdecea;
-            --error-border: #f5c2c0;
-            --error-text: #7a1f16;
-            --warn-bg: #fff6e0;
-            --warn-border: #f0dca0;
-            --warn-text: #7a5a00;
+        #register { min-height: 100vh; padding: 30px 18px; background: radial-gradient(ellipse at top left, #e6f2e9 0, transparent 48%), linear-gradient(135deg, #f5f7f6, #e9efeb); }
+        #register .lc { width: min(100%, 880px); padding: 34px 42px 32px; border: 1px solid rgba(16, 124, 65, .12); border-top: 4px solid var(--br); border-radius: 18px; box-shadow: 0 18px 48px rgba(27, 55, 39, .12); }
+        #register .lc h2 { font-size: 26px; letter-spacing: -.03em; }
+        #register .lc .sub { margin-bottom: 26px; }
+        #register form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+        #register form > .fl { min-width: 0; margin-bottom: 16px; }
+        #register form > .fl:first-of-type { grid-column: 1 / -1; }
+        #register form > .sb { grid-column: 1 / -1; min-height: 48px; margin-top: 4px; border-radius: 9px; }
+        #register .fl input[type="text"], #register .fl input[type="password"], #register .fl input[type="number"], #register .fl select { width: 100%; min-height: 44px; padding: 11px 12px; border: 1px solid #d5d9e0; border-radius: 8px; background: #fff; font: inherit; font-size: 14px; }
+        #register .fl input[type="text"]:focus, #register .fl input[type="password"]:focus, #register .fl input[type="number"]:focus, #register .fl select:focus { outline: none; border-color: var(--br); box-shadow: 0 0 0 3px rgba(16, 124, 65, .12); }
+        #register .hint { line-height: 1.45; }
+        #register .sw { margin-top: 20px; }
+        .alert { padding: 10px 14px; border: 1px solid transparent; border-radius: 8px; margin-bottom: 18px; font-size: 13px; }
+        .alert-error { background: #fdecea; border-color: #f5c2c0; color: #7a1f16; }
+        .alert-warn { background: #fff6e0; border-color: #f0dca0; color: #7a5a00; }
+        .hint { margin-top: 5px; }
+        @media (max-width: 600px) {
+            #register { padding: 18px 12px; }
+            #register .lc { padding: 28px 20px 24px; }
+            #register form { grid-template-columns: minmax(0, 1fr); gap: 0; }
+            #register form > .fl, #register form > .sb { grid-column: 1; }
         }
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(135deg, #f4f6f9 0%, #e8ecf1 100%);
-            min-height: 100vh;
-            margin: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .card {
-            background: #fff;
-            width: 100%;
-            max-width: 480px;
-            padding: 36px 32px;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-        }
-        .card h2 { margin: 0 0 6px; font-size: 22px; color: #1a1a1a; text-align: center; }
-        .card p.sub { margin: 0 0 24px; text-align: center; color: #777; font-size: 13px; }
-        .alert {
-            padding: 10px 14px; border-radius: 8px; font-size: 13px;
-            margin-bottom: 18px; border: 1px solid transparent;
-        }
-        .alert-error { background: var(--error-bg); border-color: var(--error-border); color: var(--error-text); }
-        .alert-warn  { background: var(--warn-bg);  border-color: var(--warn-border);  color: var(--warn-text); }
-        .field { margin-bottom: 16px; }
-        .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #333; }
-        .field input[type="text"], .field input[type="password"], .field input[type="number"], .field select {
-            width: 100%; padding: 11px 12px; border: 1px solid #d5d9e0;
-            border-radius: 8px; font-size: 14px; background: #fff;
-            transition: border-color 0.15s;
-        }
-        .field input:focus, .field select:focus {
-            outline: none; border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(16,124,65,0.12);
-        }
-        .field .hint { font-size: 12px; color: #888; margin-top: 5px; }
-        button.submit-btn {
-            width: 100%; padding: 12px; margin-top: 6px; background: var(--primary); color: #fff;
-            border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
-            cursor: pointer; transition: background 0.15s;
-        }
-        button.submit-btn:hover { background: var(--primary-dark); }
-        button.submit-btn:disabled { background: #a8c9b6; cursor: not-allowed; }
-        .switch-link {
-            margin-top: 20px; text-align: center; font-size: 14px; color: #555;
-        }
-        .switch-link a { color: var(--primary); font-weight: 700; text-decoration: none; }
-        .switch-link a:hover { text-decoration: underline; }
-        @media (max-width: 420px) { .card { padding: 28px 20px; border-radius: 10px; } }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2>Create an Account</h2>
+    <section id="register"><div class="lc">
+        <h2>Sign Up</h2>
         <p class="sub">DENR Interview Scoring Sheet</p>
 
         <?php if (!empty($error)): ?>
@@ -201,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="text" name="<?php echo HONEYPOT_FIELD; ?>" tabindex="-1" autocomplete="off" aria-hidden="true"
                    style="position:absolute; left:-9999px; width:1px; height:1px;">
 
-            <div class="field">
+            <div class="fl">
                 <label for="username">Full Name / Username</label>
                 <input type="text" id="username" name="username" required autofocus
                        minlength="3" maxlength="100" pattern="[\p{L}0-9 .\-]{3,100}"
@@ -209,32 +168,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        value="<?php echo htmlspecialchars($old['username']); ?>"
                        placeholder="e.g. Juan Dela Cruz" autocomplete="username"
                        <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
-                <div class="hint">Letters (including ñ), numbers, spaces, dots and dashes. This is what you sign in with.</div>
+                <div class="hint mu">Letters (including ñ), numbers, spaces, dots and dashes. This is what you sign in with.</div>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required
-                       minlength="<?php echo REG_MIN_PASSWORD; ?>" maxlength="<?php echo REG_MAX_PASSWORD; ?>"
-                       placeholder="At least <?php echo REG_MIN_PASSWORD; ?> characters" autocomplete="new-password"
-                       <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                <div class="pw">
+                    <input type="password" id="password" name="password" required
+                           minlength="<?php echo REG_MIN_PASSWORD; ?>" maxlength="<?php echo REG_MAX_PASSWORD; ?>"
+                           placeholder="At least <?php echo REG_MIN_PASSWORD; ?> characters" autocomplete="new-password"
+                           <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                </div>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="password_confirm">Confirm Password</label>
-                <input type="password" id="password_confirm" name="password_confirm" required
-                       minlength="<?php echo REG_MIN_PASSWORD; ?>" maxlength="<?php echo REG_MAX_PASSWORD; ?>"
-                       placeholder="Type the password again" autocomplete="new-password"
-                       <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                <div class="pw">
+                    <input type="password" id="password_confirm" name="password_confirm" required
+                           minlength="<?php echo REG_MIN_PASSWORD; ?>" maxlength="<?php echo REG_MAX_PASSWORD; ?>"
+                           placeholder="Type the password again" autocomplete="new-password"
+                           <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                </div>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="region">Region</label>
                 <input type="hidden" name="region" value="Region VI">
                 <input id="region" type="text" value="<?php echo htmlspecialchars(ACCESS_REGIONS['Region VI'], ENT_QUOTES, 'UTF-8'); ?>" readonly aria-readonly="true">
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="field_name">Field</label>
                 <select id="field_name" name="field_name" required <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
                     <option value="">-- Select field --</option>
@@ -250,24 +213,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        hidden <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="salary_grade">Salary Grade</label>
-                <select id="salary_grade" name="salary_grade" required
-                        <?php echo ($lockSecondsLeft !== null || !$salaryGrades) ? 'disabled' : ''; ?>>
-                    <option value="">-- Select salary grade --</option>
-                    <?php foreach ($salaryGrades as $grade): ?>
-                        <option value="<?php echo $grade; ?>" <?php echo (string)$old['salary_grade'] === (string)$grade ? 'selected' : ''; ?>>
-                            <?php echo $grade; ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <div class="hint">Your grade controls which competency forms are available to you.</div>
+                <input id="salary_grade" name="salary_grade" type="number" required step="1"
+                       min="<?php echo $salaryGrades ? min($salaryGrades) : 0; ?>"
+                       max="<?php echo $salaryGrades ? max($salaryGrades) : 26; ?>"
+                       value="<?php echo htmlspecialchars($old['salary_grade'], ENT_QUOTES, 'UTF-8'); ?>"
+                       placeholder="Enter salary grade" inputmode="numeric"
+                       <?php echo ($lockSecondsLeft !== null || !$salaryGrades) ? 'disabled' : ''; ?>>
+                <div class="hint mu">Your grade controls which competency forms are available to you.</div>
                 <?php if (!$salaryGrades): ?>
-                    <div class="hint">No Regional Office salary grades are available yet. Ask an administrator to seed or import positions.</div>
+                    <div class="hint mu">No Regional Office salary grades are available yet. Ask an administrator to seed or import positions.</div>
                 <?php endif; ?>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="role">I am a</label>
                 <select id="role" name="role" required <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
                     <option value="rater" <?php echo $old['role'] === 'rater' ? 'selected' : ''; ?>>Rater</option>
@@ -276,21 +236,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <?php if ($registrationCode !== null): ?>
-            <div class="field">
+            <div class="fl">
                 <label for="reg_code">Registration Code</label>
-                <input type="password" id="reg_code" name="reg_code" required autocomplete="off"
-                       placeholder="Ask your administrator"
-                       <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                <div class="pw">
+                    <input type="password" id="reg_code" name="reg_code" required autocomplete="off"
+                           placeholder="Ask your administrator"
+                           <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+                </div>
             </div>
             <?php endif; ?>
 
-            <button type="submit" class="submit-btn" <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+            <button type="submit" class="sb" <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
                 Sign Up
             </button>
         </form>
 
-        <div class="switch-link">Already have an account? <a href="login.php">Sign In</a></div>
-    </div>
+        <div class="sw">Already have an account? <a href="login.php">Sign In</a></div>
+    </div></section>
     <script>
         const fieldSelect = document.getElementById('field_name');
         const otherFieldInput = document.getElementById('field_other');

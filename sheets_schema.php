@@ -70,13 +70,7 @@ function default_sheets_layout(): array {
             ],
             'lead' => [
                 'label' => 'Leadership Competencies',
-                'rows'  => [
-                    ['id' => 'lc1', 'title' => 'LC1', 'desc' => "Ensures that others support the DENR's mission, goals, agenda, climate and policy"],
-                    ['id' => 'lc2', 'title' => 'LC2', 'desc' => 'Ensures the effective implementation of any change initiatives/programs of the DENR by guiding the team in the transition process'],
-                    ['id' => 'lc3', 'title' => 'LC3', 'desc' => 'Motivates, trains, coaches and mentors people towards achieving quality results'],
-                    ['id' => 'lc4', 'title' => 'LC4', 'desc' => 'Monitors employee performance regularly to help employees improve their performance'],
-                    ['id' => 'lc5', 'title' => 'LC5', 'desc' => 'Builds and develops local partnerships and networks and identifies opportunities to deliver or enhance work outcomes'],
-                ],
+                'rows'  => leadership_rows_for_level('B'),
             ],
             'func' => [
                 'label' => 'Functional Competencies',

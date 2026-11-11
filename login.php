@@ -4,19 +4,13 @@
 //
 // FIX (Bug 6): remember_admin cookie uses SameSite=Lax.
 // FIX (Bug 7): remember-me token rotated on every auto-login.
-// FIX (Bug 28): username is truncated to 100 chars BEFORE being
-//               stored in the audit log, preventing a malicious
-//               client from writing megabytes into score_audit.
 // FIX:          cookie deletion uses array setcookie() signature.
-// FIX:          login_success / login_failure written to audit.
 // ============================================================
 
 require_once 'db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/Audit.php';
-
 ensure_auth_schema($conn);
 purge_expired_tokens($conn);
 
@@ -48,11 +42,6 @@ if (!empty($_COOKIE['remember_admin'])) {
         $_SESSION['role']          = $user['role'];
         $_SESSION['last_activity'] = time();
 
-        audit_log($conn, 0, 'login_success',
-            null,
-            ['user_id' => (int)$user['id'], 'username' => $user['username'], 'via' => 'remember_me']
-        );
-
         header("Location: " . landing_page_for($user['role']));
         exit;
     } else {
@@ -74,7 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!verify_csrf($_POST['csrf_token'] ?? null)) {
         $error = 'Your session expired. Please try again.';
     } else {
-        // FIX (Bug 28): cap BEFORE it reaches audit_log / DB lookups
         $username = mb_substr(trim($_POST['username'] ?? ''), 0, 100);
         $password = $_POST['password'] ?? '';
         $user     = $username !== '' ? find_user_by_username($conn, $username) : null;
@@ -107,11 +95,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             }
 
-            audit_log($conn, 0, 'login_success',
-                null,
-                ['user_id' => (int)$user['id'], 'username' => $user['username'], 'via' => 'password']
-            );
-
             header('Location: ' . landing_page_for($user['role']));
             exit;
         } else {
@@ -120,10 +103,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Wrong username or password.';
             $lockSecondsLeft = is_locked_out($conn);
 
-            audit_log($conn, 0, 'login_failure',
-                null,
-                ['username_attempted' => $username]
-            );
         }
     }
 }
@@ -134,155 +113,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="mockup.css?v=<?php echo filemtime(__DIR__ . '/mockup.css'); ?>">
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
-        :root {
-            --primary: #107c41;
-            --primary-dark: #0b5c30;
-            --error-bg: #fdecea;
-            --error-border: #f5c2c0;
-            --error-text: #7a1f16;
-            --warn-bg: #fff6e0;
-            --warn-border: #f0dca0;
-            --warn-text: #7a5a00;
-            --success-bg: #e6f4ea;
-            --success-border: #b7e1cd;
-            --success-text: #137333;
-        }
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(135deg, #f4f6f9 0%, #e8ecf1 100%);
-            min-height: 100vh;
-            margin: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .login-card {
-            background: #fff;
-            width: 100%;
-            max-width: 380px;
-            padding: 36px 32px;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-        }
-        .login-card h2 {
-            margin: 0 0 6px;
-            font-size: 22px;
-            color: #1a1a1a;
-            text-align: center;
-        }
-        .login-card p.sub {
-            margin: 0 0 24px;
-            text-align: center;
-            color: #777;
-            font-size: 13px;
-        }
-        .alert {
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin-bottom: 18px;
-            border: 1px solid transparent;
-        }
-        .alert-error   { background: var(--error-bg); border-color: var(--error-border); color: var(--error-text); }
-        .alert-warn    { background: var(--warn-bg);  border-color: var(--warn-border);  color: var(--warn-text); }
-        .alert-success { background: var(--success-bg); border-color: var(--success-border); color: var(--success-text); }
-        .field { margin-bottom: 18px; }
-        .field label {
-            display: block;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 6px;
-            color: #333;
-        }
-        .field input[type="text"] {
-            width: 100%;
-            padding: 11px 12px;
-            border: 1px solid #d5d9e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.15s;
-        }
-        .pw-wrap { position: relative; }
-        .pw-wrap input {
-            width: 100%;
-            padding: 11px 42px 11px 12px;
-            border: 1px solid #d5d9e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.15s;
-        }
-        .field input:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(16,124,65,0.12);
-        }
-        .pw-toggle {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            cursor: pointer;
-            background: none;
-            border: none;
-            padding: 4px;
-            color: #888;
-            display: flex;
-        }
-        .pw-toggle:hover { color: #333; }
-        .remember-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: #555;
-            margin-bottom: 22px;
-        }
-        .remember-row input { cursor: pointer; width: 15px; height: 15px; }
-        button.submit-btn {
-            width: 100%;
-            padding: 12px;
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        button.submit-btn:hover { background: var(--primary-dark); }
-        button.submit-btn:disabled { background: #a8c9b6; cursor: not-allowed; }
-        .switch-link {
-            margin-top: 20px;
-            text-align: center;
-            font-size: 14px;
-            color: #555;
-        }
-        .switch-link a {
-            color: var(--primary);
-            font-weight: 700;
-            text-decoration: none;
-        }
-        .switch-link a:hover { text-decoration: underline; }
-        .back-link {
-            display: block;
-            text-align: center;
-            margin-top: 14px;
-            font-size: 13px;
-            color: #888;
-            text-decoration: none;
-        }
-        .back-link:hover { color: var(--primary); text-decoration: underline; }
-        @media (max-width: 420px) {
-            .login-card { padding: 28px 20px; border-radius: 10px; }
+        #login { min-height: 100vh; padding: 32px 18px; background: radial-gradient(ellipse at top left, #e6f2e9 0, transparent 48%), linear-gradient(135deg, #f5f7f6, #e9efeb); }
+        #login .lc { width: min(100%, 440px); padding: 38px 36px 30px; border: 1px solid rgba(16, 124, 65, .12); border-top: 4px solid var(--br); border-radius: 18px; box-shadow: 0 18px 48px rgba(27, 55, 39, .12); }
+        #login .lc h2 { font-size: 26px; letter-spacing: -.03em; }
+        #login .lc .sub { margin-bottom: 28px; }
+        #login .fl { margin-bottom: 20px; }
+        #login .fl input[type="text"], #login .pw input { min-height: 46px; }
+        #login .rm { margin: 2px 0 22px; }
+        #login .sb { min-height: 48px; border-radius: 9px; }
+        #login .sw { margin-top: 16px; }
+        #login .bk { margin-top: 20px; }
+        .alert { padding: 10px 14px; border: 1px solid transparent; border-radius: 8px; margin-bottom: 18px; font-size: 13px; }
+        .alert-error { background: #fdecea; border-color: #f5c2c0; color: #7a1f16; }
+        .alert-warn { background: #fff6e0; border-color: #f0dca0; color: #7a5a00; }
+        .alert-success { background: #e6f4ea; border-color: #b7e1cd; color: #137333; }
+        @media (max-width: 480px) {
+            #login { padding: 18px 14px; }
+            #login .lc { padding: 30px 22px 24px; }
         }
     </style>
 </head>
 <body>
-    <div class="login-card">
+    <section id="login"><div class="lc">
         <h2>Sign In</h2>
         <p class="sub">DENR Interview Scoring Sheet</p>
 
@@ -301,20 +159,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="POST" action="login.php" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
 
-            <div class="field">
+            <div class="fl">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autofocus
                        placeholder="Your username" autocomplete="username"
                        <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
             </div>
 
-            <div class="field">
+            <div class="fl">
                 <label for="password">Password</label>
-                <div class="pw-wrap">
+                <div class="pw">
                     <input type="password" id="password" name="password" required
                            placeholder="Your password" autocomplete="current-password"
                            <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
-                    <button type="button" class="pw-toggle" id="pwToggle" aria-label="Show password" tabindex="-1">
+                    <button type="button" class="pt" id="pwToggle" aria-label="Show password" tabindex="-1">
                         <svg id="eyeOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
                             <circle cx="12" cy="12" r="3"></circle>
@@ -327,19 +185,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             </div>
 
-            <label class="remember-row">
+            <label class="rm">
                 <input type="checkbox" name="remember" value="1">
                 Remember me on this device
             </label>
 
-            <button type="submit" class="submit-btn" <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
+            <button type="submit" class="sb" <?php echo $lockSecondsLeft !== null ? 'disabled' : ''; ?>>
                 Log In
             </button>
         </form>
 
-        <div class="switch-link">Don't have an account? <a href="register.php">Sign Up</a></div>
-        <a href="index.php" class="back-link">&larr; Return to Scoring Sheet</a>
-    </div>
+        <div class="sw">Forgot your password? <a href="password_reset.php">Request admin approval to change it</a></div>
+        <div class="sw">Don't have an account? <a href="register.php">Sign Up</a></div>
+        <a href="index.php" class="bk">&larr; Return to Scoring Sheet</a>
+    </div></section>
 
     <script>
         const toggle = document.getElementById('pwToggle');

@@ -11,7 +11,6 @@
 //              after commit().
 // FIX (Bug 22): $deletedPositions counts positions, not candidate
 //               rows.
-// FIX: audit entries written after commit.
 // ============================================================
 
 ob_start();
@@ -21,7 +20,6 @@ require_once __DIR__ . '/AuthSchema.php';
 require_once 'auth.php';
 require_admin(true);
 require_once __DIR__ . '/Raters.php';
-require_once __DIR__ . '/Audit.php';
 
 ensure_schema($conn);
 
@@ -71,7 +69,6 @@ try {
 
     $savedIds        = [];
     $orderByPosition = [];
-    $auditEntries    = [];
 
     foreach ($data['candidates'] as $c) {
         $id        = (int)($c['id'] ?? 0);
@@ -108,13 +105,11 @@ try {
             $stmtUpdate->execute();
             $candidateId = $id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $id];
-            $action = 'edit';
         } elseif ($name !== '') {
             $stmtInsert->bind_param("sssss", $name, $office, $officeLoc, $position, $interviewDate);
             $stmtInsert->execute();
             $candidateId = $conn->insert_id;
             $savedIds[] = ['tempIndex' => $tempIndex, 'id' => $candidateId];
-            $action = 'submit';
         } else {
             continue;
         }
@@ -127,16 +122,6 @@ try {
             $stmtUpsertScore->execute();
         }
 
-        $auditEntries[] = [
-            'candidate_id' => $candidateId,
-            'action'       => $action,
-            'new'          => [
-                'candidate_name' => $name,
-                'position_title' => $position,
-                'office_name'    => $office,
-                'raters'         => array_keys($cleanScores)
-            ]
-        ];
     }
 
     // ---------- FIX (Bug 22): count positions, not candidate rows ----------
@@ -167,11 +152,6 @@ try {
 
             $deletedPositions++;
 
-            $auditEntries[] = [
-                'candidate_id' => 0,
-                'action'       => 'delete',
-                'new'          => ['office' => $off, 'position' => $pos]
-            ];
         }
         $stmtDelScores->close();
         $stmtDelCands->close();
@@ -220,11 +200,6 @@ try {
             $stmtUnhide->execute();
             $stmtUnhide->close();
 
-            $auditEntries[] = [
-                'candidate_id' => 0,
-                'action'       => 'edit',
-                'new'          => ['office_from' => $from, 'office_to' => $to, 'via' => 'rename_tab']
-            ];
         }
         $stmtRenameCand->close();
     }
@@ -372,10 +347,6 @@ try {
     }
 
     $conn->commit();
-
-    foreach ($auditEntries as $entry) {
-        audit_log($conn, $entry['candidate_id'], $entry['action'], null, $entry['new']);
-    }
 
     json_out([
         'status'           => 'success',

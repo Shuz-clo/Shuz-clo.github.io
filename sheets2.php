@@ -67,6 +67,8 @@ $todayDate = date('F j, Y');
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="chrome" content="nofill">
 <title>Sheets Dashboard</title>
+<link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+<script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
 <style>
   :root { --bg:#f8f9fa; --rail:#0d0d0d; --accent:#6ea8fe; --blue:#2b579a; }
   * { box-sizing: border-box; }
@@ -559,6 +561,13 @@ $todayDate = date('F j, Y');
   }
 
   function renderTabsAndTables() {
+    if (typeof window.runUITransition === 'function') {
+      return window.runUITransition(renderTabsAndTablesNow, 'sheet-forward');
+    }
+    return renderTabsAndTablesNow();
+  }
+
+  function renderTabsAndTablesNow() {
     const tabsBar = $('tabs-bar');
     const containerWrapper = $('tablesContainerWrapper');
     if (!tabsBar || !containerWrapper) return;
@@ -657,13 +666,7 @@ $todayDate = date('F j, Y');
           { id:'oc4', title:'OC4 - PROJECT MANAGEMENT', desc: 'Leads in project management activities' },
           { id:'oc5', title:'OC5 - COMPLETE STAFF WORK (CSW)', desc: 'Leads the practice of CSW in his/her office/unit' }
         ]},
-        lead: { label: 'Leadership Competencies', rows: [
-          { id:'lc1', title:'LC1 – STRATEGIC LEADERSHIP (THINKING STRATEGICALLY AND CREATIVELY)', desc: 'Develops office/ service’s strategies and plans based on the DENR’s mission/vision' },
-          { id:'lc2', title:'LC2 – LEADING CHANGE', desc: 'Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation' },
-          { id:'lc3', title:'LC3 – PEOPLE DEVELOPMENT (CREATING AND NURTURING A HIGH PERFORMING ORGANIZATION)', desc: 'Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals' },
-          { id:'lc4', title:'LC4 – PEOPLE PERFORMANCE MANAGEMENT (MANAGING PERFORMANCE AND COACHING FOR RESULTS)', desc: 'Leads in project management activities' },
-          { id:'lc5', title:'LC5 – PARTNERSHSIP AND NETWORKING (BUILDING COLLABORATIVE AND INCLUSIVE WORKING RELATIONSHIPS)', desc: 'Leads the practice of CSW in his/her office/unit' }
-        ]},
+        lead: { label: 'Leadership Competencies', rows: <?php echo $defaultLeadershipRowsJson; ?> },
         func: { label: 'Functional Competencies', rows: [
           { id:'pco1', title:'PCO1 – CONCEPT AND APPLICATION OF INTEGRATED ECOSYSTEMS MANAGEMENT (IEM)', desc: 'Applies IEM and other related approaches to NRM' },
           { id:'pco2', title:'PCO2 – IDENTIFICATION OF INTERVENTIONS AND INTEGRATING STRATEGIES ACROSS (FORESTRY, COASTAL, AGRICULTURE, URBAN, AIR PACE) AND ZONING FOR STRATEGIC MANAGEMENT', desc: 'Identifies interventions and integrating strategies across sectors' },
@@ -824,16 +827,24 @@ $todayDate = date('F j, Y');
   }
 
   function showHome() {
-    const ed = $('editorView'); const hm = $('homeView');
-    if (ed) ed.style.display = 'none';
-    if (hm) hm.style.display = 'block';
     currentSheetId = null;
+    const updateView = () => {
+      const ed = $('editorView'); const hm = $('homeView');
+      if (ed) ed.style.display = 'none';
+      if (hm) hm.style.display = 'block';
+    };
+    if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+    else updateView();
     loadList();
   }
   function showEditor() {
-    const ed = $('editorView'); const hm = $('homeView');
-    if (hm) hm.style.display = 'none';
-    if (ed) ed.style.display = 'flex';
+    const updateView = () => {
+      const ed = $('editorView'); const hm = $('homeView');
+      if (hm) hm.style.display = 'none';
+      if (ed) ed.style.display = 'flex';
+    };
+    if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+    else updateView();
   }
 
   async function loadList() {

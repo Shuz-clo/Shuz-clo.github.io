@@ -1,28 +1,8 @@
 <?php
 const BASIC_MAX_SG = 9;
 
-function position_is_basic_level(int $salaryGrade): bool {
-    return $salaryGrade <= BASIC_MAX_SG;
-}
-
-function basic_core_competency_descriptions(): array {
-    return [
-        'cc1' => 'Practices ethical and professional behaviors',
-        'cc2' => "Complies with DENR's standards of service delivery",
-        'cc3' => 'Demonstrates virtue, goodness, honor, justness and decency at all times',
-        'cc4' => 'Observes the principle of transparency and accountability in the workplace with supervision and guidance',
-        'cc5' => 'Has knowledge of concepts and application of preservation and conservation of the environment',
-    ];
-}
-
-function basic_org_competency_descriptions(): array {
-    return [
-        'oc1' => 'Refers to and/or uses existing communication materials or templates to produce own written work',
-        'oc2' => 'Effectively delivers messages that simply focus on data, facts or information and requires minimal preparation or can be supported by available communication materials. Focus of communication is to relay information and/or data',
-        'oc3' => 'Applies basic technology (office software and equipment) in the performance of the assigned tasks. Collects, organizes and maintains data',
-        'oc4' => 'Assist in project management activities',
-        'oc5' => 'Practices basic knowledge of CSW to generate complete, accurate, relevant and timely output',
-    ];
+function template_level_for_salary_grade(int $sg): string {
+    return $sg <= BASIC_MAX_SG ? 'Basic' : 'Advanced';
 }
 
 if (!function_exists('rater_list')) {
@@ -44,6 +24,7 @@ if (!function_exists('canonical_rater_name')) {
 }
 
 function ensure_column(mysqli $conn, string $table, string $column, string $definitionSql): void {
+    if (!app_allow_ddl()) return;
     try {
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return;
         $stmt = $conn->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
@@ -59,6 +40,7 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
 }
 
 function ensure_schema(mysqli $conn): void {
+    if (!app_allow_ddl()) return;
     $conn->query("CREATE TABLE IF NOT EXISTS `candidates` (
       `id` int(11) NOT NULL AUTO_INCREMENT, `candidate_name` varchar(255) DEFAULT NULL, `position_title` varchar(255) DEFAULT NULL,
       `office_location` varchar(100) DEFAULT NULL, `office_name` varchar(255) DEFAULT '', `interview_date` varchar(255) DEFAULT NULL,
@@ -92,14 +74,100 @@ function ensure_schema(mysqli $conn): void {
 }
 
 function leadership_level_titles(): array {
-    return [ 'Planning Officer V' => 'I', 'Chief Administrative Officer' => 'I', 'Attorney V' => 'I', 'Development Management Officer V' => 'I', 'Engineer V (Geodetic Engineer)' => 'I', 'Chief Ecosystems Management Specialist' => 'I', 'Provincial Environment & Natural Resources Officer' => 'I', 'Community Environment & Natural Resources Officer' => 'I', 'Community Environment & Natural Resources Officer (CENRO)' => 'I', 'Senior Communications Development Officer' => 'B', 'Planning Officer IV' => 'B', 'Planning Officer III' => 'B', 'Project Evaluation Officer III' => 'B', 'Information Systems Analyst III' => 'B', 'Supervising Administrative Officer' => 'B', 'Administrative Officer V' => 'B', 'Administrative Officer V (Budget Officer III)' => 'B', 'Administrative Officer V (HRMO III)' => 'B', 'Administrative Officer V (Cashier III)' => 'B', 'Accountant III' => 'B', 'Attorney IV' => 'B', 'Attorney III' => 'B', 'Attorney II' => 'B', 'Development Management Officer IV' => 'B', 'Development Management Officer III' => 'B', 'Engineer IV (Geodetic Engineer)' => 'B', 'Engineer III (Geodetic Engineer)' => 'B', 'Engineer II (Geodetic Engineer)' => 'B', 'Forester III' => 'B', 'Supervising Ecosystems Management Specialist' => 'B', 'Senior Ecosystems Management Specialist' => 'B', 'Land Management Officer III' => 'B', ];
+    return [
+        'Engineer II (Geodetic Engineer)' => 'B',
+        'Accountant III' => 'B',
+        'Engineer III (Geodetic Engineer)' => 'B',
+        'Information Systems Analyst III' => 'B',
+        'Attorney III' => 'B',
+        'Administrative Officer V' => 'B',
+        'Administrative Officer V (Budget Officer III)' => 'B',
+        'Administrative Officer V (Cashier III)' => 'B',
+        'Administrative Officer V (HRMO III)' => 'B',
+        'Attorney II' => 'B',
+        'Development Management Officer III' => 'B',
+        'Forester III' => 'B',
+        'Land Management Officer III' => 'B',
+        'Planning Officer III' => 'B',
+        'Project Evaluation Officer III' => 'B',
+        'Senior Communications Development Officer' => 'B',
+        'Senior Ecosystems Management Specialist' => 'B',
+        'Development Management Officer IV' => 'B',
+        'Engineer IV (Geodetic Engineer)' => 'B',
+        'Planning Officer IV' => 'B',
+        'Supervising Administrative Officer' => 'B',
+        'Supervising Ecosystems Management Specialist' => 'B',
+        'Attorney IV' => 'B',
+        'Chief Administrative Officer' => 'I',
+        'Chief Ecosystems Management Specialist' => 'I',
+        'Community Environment & Natural Resources Officer' => 'I',
+        'Community Environment & Natural Resources Officer (CENRO)' => 'I',
+        'Development Management Officer V' => 'I',
+        'Engineer V (Geodetic Engineer)' => 'I',
+        'Planning Officer V' => 'I',
+        'Attorney V' => 'I',
+    ];
 }
 
 function leadership_level_aliases(): array {
-    return [ ['ATY','V','I'], ['ATY','IV','B'], ['ATY','III','B'], ['ATY','II','B'], ['ATTY','V','I'], ['ATTY','IV','B'], ['ATTY','III','B'], ['ATTY','II','B'], ['DMO','V','I'], ['DMO','IV','B'], ['DMO','III','B'], ['ENG','V','I'], ['ENG','IV','B'], ['ENG','III','B'], ['ENG','II','B'], ['PLO','V','I'], ['PLO','IV','B'], ['PLO','III','B'], ['PEO','III','B'], ['LAMO','III','B'], ['FORST','III','B'], ['INFOSA','III','B'], ['ISA','III','B'], ['A','III','B'], ['ADOF','V','B'], ['AO','V','B'], ['SADOF','','B'], ['SAO','','B'], ['SVEMS','','B'], ['SREMS','','B'], ['SRCDO','','B'], ['CECMS','','I'], ['CADOF','','I'], ['CAO','','I'], ['CENRO','','I'], ['PENRO','','I'], ];
+    return [
+        ['ATY','V','I'], ['ATY','IV','B'], ['ATY','III','B'], ['ATY','II','B'],
+        ['ATTY','V','I'], ['ATTY','IV','B'], ['ATTY','III','B'], ['ATTY','II','B'],
+        ['DMO','V','I'], ['DMO','IV','B'], ['DMO','III','B'],
+        ['ENG','V','I'], ['ENG','IV','B'], ['ENG','III','B'], ['ENG','II','B'],
+        ['PLO','V','I'], ['PLO','IV','B'], ['PLO','III','B'],
+        ['PEO','III','B'], ['LAMO','III','B'], ['FORST','III','B'],
+        ['INFOSA','III','B'], ['ISA','III','B'], ['A','III','B'],
+        ['ADOF','V','B'], ['AO','V','B'], ['SADOF','','B'], ['SAO','','B'],
+        ['SVEMS','','B'], ['SREMS','','B'], ['SRCDO','','B'],
+        ['CECMS','','I'], ['CADOF','','I'], ['CAO','','I'], ['CENRO','','I'],
+    ];
 }
 
-function leadership_hidden_positions(): array { return ['SVEMS', 'SUPERVISING ECOSYSTEMS MANAGEMENT SPECIALIST']; }
+const LEADERSHIP_ROW_TITLES = [
+    'LC1 - STRATEGIC LEADERSHIP (THINKING STRATEGICALLY AND CREATIVELY)',
+    'LC2 - LEADING CHANGE',
+    'LC3 - PEOPLE DEVELOPMENT (CREATING AND NURTURING A HIGH PERFORMING ORGANIZATION)',
+    'LC4 - PEOPLE PERFORMANCE MANAGEMENT (MANAGING PERFORMANCE AND COACHING FOR RESULTS)',
+    'LC5 - PARTNERSHIP AND NETWORKING (BUILDING COLLABORATIVE AND INCLUSIVE WORKING RELATIONSHIPS)',
+];
+
+const LEADERSHIP_BASIC_SOURCE_DESCRIPTORS = [
+    "Develops office/ service's strategies and plans based on the DENR's mission/vision",
+    'Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation',
+    'Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals',
+    'Leads in project management activities',
+    'Leads the practice of CSW in his/her office/unit',
+];
+
+const LEADERSHIP_ADVANCED_DESCRIPTORS = [
+    "Ensures that others support the DENR's mission, goals, agenda, climate, and policy",
+    'Ensures the effective implementation of any change initiatives/programs of the DENR by guiding the team in the transition process',
+    'Motivates, trains, coaches and mentors people towards achieving quality results',
+    'Monitors employee performance regularly to help employee improve his/her performance',
+    'Builds and develops local partnerships and networks and identifies opportunities to deliver or enhance work outcomes',
+];
+
+function leadership_rows_for_level(string $level): array {
+    $level = strtoupper(trim($level));
+    $descriptors = match ($level) {
+        'B' => LEADERSHIP_BASIC_SOURCE_DESCRIPTORS,
+        'I' => LEADERSHIP_ADVANCED_DESCRIPTORS,
+        default => throw new InvalidArgumentException('Leadership level must be B or I.'),
+    };
+
+    $rows = [];
+    foreach (LEADERSHIP_ROW_TITLES as $index => $title) {
+        $rows[] = [
+            'id' => 'lc' . ($index + 1),
+            'title' => $title,
+            'desc' => $descriptors[$index],
+        ];
+    }
+    return $rows;
+}
+
+function leadership_hidden_positions(): array { return []; }
 function offices_without_leadership(): array { return []; }
 
 function normalize_position(string $s): string { $s = str_replace('&', ' AND ', $s); $s = preg_replace('/\s+/u', ' ', $s); return mb_strtoupper(trim((string)$s)); }

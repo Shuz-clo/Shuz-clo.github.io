@@ -3,9 +3,25 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/AccessGroups.php';
+require_once __DIR__ . '/Raters.php';
+require_once __DIR__ . '/OfficeTypeMap.php';
 
 ensure_auth_schema($conn);
 require_admin();
+$defaultLeadershipRowsJson = json_encode(
+    leadership_rows_for_level('B'),
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+);
+$advancedLeadershipRowsJson = json_encode(
+    leadership_rows_for_level('I'),
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+);
+$officeSheetChoices = [];
+foreach (OFFICE_TYPE_SHEET_MAP as $sheetName => $sheetMapping) {
+    if (in_array($sheetMapping['office_type'] ?? '', ['RO', 'FO'], true)) {
+        $officeSheetChoices[$sheetName] = $sheetMapping['office_type'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -13,6 +29,8 @@ require_admin();
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Competency Templates</title>
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
         :root {
             color-scheme: light;
@@ -136,6 +154,10 @@ require_admin();
         #search { width: 300px; max-width: 100%; margin-bottom: 20px; padding: 10px 14px; border: 1px solid #ccc; }
         .list-head { display: flex; padding: 0 12px 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 14px; }
         .list-head > div:first-child { flex: 1; }
+        .list-head .name-heading { display: flex; align-items: center; gap: 12px; }
+        .list-head .name-heading label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .list-actions { display: flex; align-items: center; gap: 12px; min-height: 38px; margin: -8px 0 10px; }
+        #bulkDeleteStatus { color: #687584; }
         .list-head .col-date { width: 200px; }
         .list-head .col-actions { width: 40px; }
         .sheet-row { display: flex; align-items: center; min-height: 60px; padding: 0 12px; border-bottom: 1px solid #eee; background: #fff; }
@@ -157,6 +179,80 @@ require_admin();
             .section-table { min-width: 640px; }
             .paper { overflow-x: auto; }
         }
+        :root {
+            --ink: #1c2420;
+            --muted: #6b756f;
+            --line: #d6ddd8;
+            --canvas: #f3f5f4;
+            --green: #107c41;
+            --green-dark: #0b5c30;
+        }
+        body { background: var(--canvas); color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif; }
+        .rail { background: #fff; border-right: 1px solid var(--line); }
+        .rail button { border-left-color: transparent; color: var(--ink); }
+        .rail button:hover { background: #f4f7f5; }
+        .rail button.active { border-left-color: var(--green); background: #e3f1d9; color: var(--green-dark); font-weight: 700; }
+        #homeView { padding: 24px clamp(16px, 4vw, 40px); background: var(--canvas); }
+        #homeView h1 { margin-bottom: 8px; }
+        #homeView > p { color: var(--muted); line-height: 1.5; }
+        .button { min-height: 36px; border-color: var(--line); border-radius: 8px; color: var(--ink); }
+        .button:hover { background: #f4f7f5; border-color: #bfc9c3; }
+        .button.primary { border-color: var(--green); background: var(--green); }
+        .button.primary:hover { background: var(--green-dark); }
+        .button.danger { color: #b3261e; border-color: #f0c4c0; }
+        .button.danger:hover { background: #fdecea; }
+        .templates { gap: 12px; padding: 0 0 18px; border-color: var(--line); }
+        .tpl { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); }
+        .tpl:hover { border-color: var(--green); background: #f6fbf7; box-shadow: 0 7px 18px rgba(16, 124, 65, .12); }
+        .tpl .page { border-color: var(--line); border-radius: 4px; box-shadow: 0 2px 6px rgba(0, 0, 0, .06); }
+        #search { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+        #search:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(16, 124, 65, .12); }
+        .list-head { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px 8px 0 0; background: #f4f7f5; color: var(--muted); font-size: 12px; }
+        .sheet-row { min-height: 58px; border: 1px solid var(--line); border-top: 0; }
+        .sheet-row:last-child { border-radius: 0 0 8px 8px; }
+        .sheet-row:hover { background: #f6fbf7; }
+        .sheet-row .name { color: var(--ink); font: inherit; font-weight: 600; }
+        .sheet-row .name small { color: var(--muted); }
+        .sheet-row .col-date { color: var(--muted); }
+        #editorView { background: var(--canvas); }
+        .bar { min-height: 58px; flex-wrap: wrap; padding: 10px 16px; background: #fff; color: var(--ink); border-bottom: 1px solid var(--line); }
+        .bar button { min-height: 36px; padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; font-weight: 600; }
+        .bar button:hover { background: #f4f7f5; border-color: #bfc9c3; }
+        .bar button.primary { border-color: var(--green); background: var(--green); color: #fff; }
+        .bar button.primary:hover { background: var(--green-dark); }
+        #templateTitle { border-radius: 8px; color: var(--ink); }
+        #templateTitle:focus, #templateTitle:hover { border-color: var(--line); }
+        #templateTitle::placeholder { color: var(--muted); }
+        .save-status { color: var(--muted); }
+        .save-status[data-state="error"] { color: #b3261e; }
+        .gridwrap { background: var(--canvas); }
+        .editor-toolbar { max-width: 1100px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+        .editor-toolbar label { color: var(--muted); font-size: 12px; font-weight: 600; }
+        .editor-toolbar input:not([type="checkbox"]), .editor-toolbar select { min-height: 36px; border-color: var(--line); border-radius: 8px; font: inherit; }
+        .editor-toolbar input:focus, .editor-toolbar select:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(16, 124, 65, .12); }
+        .editor-toolbar .button { border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-weight: 600; }
+        .editor-toolbar .button:hover:not(:disabled) { border-color: #bfc9c3; background: #f4f7f5; color: var(--ink); }
+        .editor-toolbar .button:disabled { opacity: .55; }
+        .sheet-label-editor { border-color: var(--line); border-radius: 10px; }
+        .excel-tabs-container { border-color: var(--line); border-radius: 10px 10px 0 0; background: #e8ede9; }
+        .template-tabs { gap: 4px; }
+        .template-tab { border-color: transparent; border-radius: 8px 8px 0 0; background: transparent; color: #55605a; font-size: 13px; }
+        .template-tab:hover { background: #dde4df; }
+        .template-tab.active { border: 0; border-top: 3px solid var(--green); background: #fff; color: var(--green); }
+        .content { max-width: 1100px; }
+        .paper { border: 1px solid var(--line); border-radius: 0 0 10px 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, .05); }
+        .section-table th, .section-table td { border-color: var(--line); }
+        .section-table .sec-header { background: #e8ede9; }
+        .section-table input.row-title:focus, .section-table textarea.row-desc:focus, .section-table .sec-label:focus, .section-table .sec-level:focus { outline: 2px solid rgba(16, 124, 65, .35); outline-offset: 1px; }
+        .section-actions .button { border-radius: 8px; }
+        .empty-state p, .section-note { color: var(--muted); }
+        @media (max-width: 700px) {
+            .editor-toolbar { padding: 10px; }
+            .bar { gap: 8px; }
+            .bar button { flex: 1 1 auto; }
+            .save-status { width: 100%; }
+            .list-head .name-heading { flex-wrap: wrap; }
+        }
     </style>
 </head>
 <body>
@@ -165,6 +261,8 @@ require_admin();
     <button id="navNew" type="button">New</button>
     <button id="navOpen" type="button">Open</button>
     <div class="spacer"></div>
+    <button class="small" type="button" onclick="location.href='positions_import.php'">Import Positions</button>
+    <button class="small" type="button" onclick="location.href='results_2.php'">Results</button>
     <button class="small" type="button" onclick="location.href='index.php'">Main Sheet</button>
     <button class="small" type="button" onclick="location.href='logout.php'">Log out</button>
 </nav>
@@ -172,7 +270,8 @@ require_admin();
 <main id="homeView">
     <h1>Competency Templates</h1>
     <p>Manage shared competency forms. For example, set Basic forms to grades 0–17 and Advanced forms to 18–25. New forms stay private until you make them available to raters.</p>
-    <p><a class="button primary" href="template_seed.php">Generate Regional Office Position Sheets</a></p>
+    <p>Generate position-specific scoring sheets from your position list here. Existing competency content is preserved unless you choose the rebuild option.</p>
+    <p><a class="button primary" href="template_seed.php">Generate Position Sheets</a></p>
     <div class="templates">
         <button class="tpl" type="button" id="tplNew">
             <div class="page"></div>
@@ -180,8 +279,12 @@ require_admin();
         </button>
     </div>
     <input id="search" type="search" placeholder="Search for a template" autocomplete="off" aria-label="Search templates">
+    <div class="list-actions">
+        <button class="button danger" type="button" id="deleteSelectedBtn" disabled>Delete selected (0)</button>
+        <span id="bulkDeleteStatus" role="status" aria-live="polite"></span>
+    </div>
     <div class="list-head">
-        <div>Name</div>
+        <div class="name-heading"><label><input id="selectAllVisible" type="checkbox"> Select all (visible)</label><span>Name</span></div>
         <div class="col-date">Date modified</div>
         <div class="col-actions"></div>
     </div>
@@ -200,9 +303,23 @@ require_admin();
         <div class="editor-toolbar">
             <button class="button" id="newTemplateBtn" type="button">＋ New Template</button>
             <label>Salary grades
-                <input id="minSalaryGrade" type="number" min="0" max="25" value="0" aria-label="Minimum salary grade">
+                <input id="minSalaryGrade" type="number" min="0" max="26" value="0" aria-label="Minimum salary grade">
                 to
-                <input id="maxSalaryGrade" type="number" min="0" max="25" value="17" aria-label="Maximum salary grade">
+                <input id="maxSalaryGrade" type="number" min="0" max="26" value="17" aria-label="Maximum salary grade">
+            </label>
+            <label>Office type
+                <select id="templateOfficeType" class="scope-select" aria-label="Template office type">
+                    <option value="RO">Region</option>
+                    <option value="FO">Field</option>
+                </select>
+            </label>
+            <label>Source sheet
+                <select id="templateSourceSheet" class="scope-select" aria-label="Template source sheet">
+                    <option value="">Not specified</option>
+                    <?php foreach ($officeSheetChoices as $sheetName => $officeType): ?>
+                        <option value="<?php echo htmlspecialchars($sheetName, ENT_QUOTES, 'UTF-8'); ?>" data-office-type="<?php echo htmlspecialchars($officeType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($sheetName, ENT_QUOTES, 'UTF-8'); ?></option>
+                    <?php endforeach; ?>
+                </select>
             </label>
             <label>Region
                 <select id="templateRegion" class="scope-select" aria-label="Template region scope">
@@ -250,6 +367,8 @@ require_admin();
 </main>
 <script>
     const CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;
+    const LEADERSHIP_ROWS_BASIC = <?php echo $defaultLeadershipRowsJson; ?>;
+    const LEADERSHIP_ROWS_ADVANCED = <?php echo $advancedLeadershipRowsJson; ?>;
     let templates = [];
     let currentTemplate = null;
     let activeSectionKey = null;
@@ -269,6 +388,8 @@ require_admin();
     const templateRegionInput = document.getElementById('templateRegion');
     const templateFieldInput = document.getElementById('templateField');
     const templateFieldOtherInput = document.getElementById('templateFieldOther');
+    const templateOfficeTypeInput = document.getElementById('templateOfficeType');
+    const templateSourceSheetInput = document.getElementById('templateSourceSheet');
     const templateSharedInput = document.getElementById('templateShared');
     const sheetLabelFields = document.getElementById('sheetLabelFields');
     const homeView = document.getElementById('homeView');
@@ -291,8 +412,25 @@ require_admin();
         }
         templateFieldOtherInput.hidden = templateFieldInput.value !== 'Other';
     }
+
+    function syncSourceSheetChoices() {
+        Array.from(templateSourceSheetInput.options).forEach(option => {
+            if (!option.value) return;
+            option.hidden = option.dataset.officeType !== templateOfficeTypeInput.value;
+        });
+        const selectedOption = templateSourceSheetInput.selectedOptions[0];
+        if (selectedOption?.value && selectedOption.dataset.officeType !== templateOfficeTypeInput.value) {
+            templateSourceSheetInput.value = '';
+        }
+    }
     const templateList = document.getElementById('templateList');
     const searchInput = document.getElementById('search');
+    const selectAllVisible = document.getElementById('selectAllVisible');
+    const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    const bulkDeleteStatus = document.getElementById('bulkDeleteStatus');
+    const selectedTemplateIds = new Set();
+    let visibleTemplateIds = [];
+    const BASIC_MAX_SG = <?php echo BASIC_MAX_SG; ?>;
     const DEFAULT_SHEET_LABELS = {
         department: 'Department of Environment and Natural Resources',
         region_line: 'Region VI, Western Visayas',
@@ -352,28 +490,22 @@ require_admin();
 
     function standardSections() {
         return {
-            core: { standard: true, label: 'Core Competencies', level: 'Evidence', rating_label: 'Rating', rows: [
+            core: { standard: true, label: 'Core Competencies', level: 'Basic', rating_label: 'Rating', rows: [
                 { id: 'cc1', title: 'CC1 - DISCIPLINE', desc: 'Serves as a good role model on DENR values and ethics to staff/peers' },
                 { id: 'cc2', title: 'CC2 - EXCELLENCE', desc: 'Anticipates, identifies and manages stakeholders’ standards and requirements towards excellent customer service through improving sense of responsibility and competence' },
                 { id: 'cc3', title: 'CC3 - NOBILITY', desc: 'Influences others to observe virtue, goodness, honor, justness and decency in all situations' },
                 { id: 'cc4', title: 'CC4 - RESPONSIBILITY', desc: 'Leads in the observance of the principle of transparency and accountability in the workplace' },
                 { id: 'cc5', title: 'CC5 - CARING FOR THE ENVIRONMENT AND NATURAL RESOURCES', desc: 'Serves as a good role model in conserving and preserving the environment to peers and staff' }
             ]},
-            org: { standard: true, label: 'Organizational Competencies', level: 'Advanced', rating_label: 'Rating', rows: [
+            org: { standard: true, label: 'Organizational Competencies', level: 'Basic', rating_label: 'Rating', rows: [
                 { id: 'oc1', title: 'OC1 - WRITING EFFECTIVELY', desc: 'Produces written work from scratch with some guidance while complying to agreed or prescribed standards of communicating with the bureaucracy' },
                 { id: 'oc2', title: 'OC2 - SPEAKING EFFECTIVELY', desc: 'Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation' },
                 { id: 'oc3', title: 'OC3 - TECHNOLOGY LITERACY AND MANAGING INFORMATION', desc: 'Analyzes appropriateness of office software and equipment in the performance of the assigned tasks. Develops information assets to achieve organizational goals' },
                 { id: 'oc4', title: 'OC4 - PROJECT MANAGEMENT', desc: 'Leads in project management activities' },
                 { id: 'oc5', title: 'OC5 - COMPLETE STAFF WORK (CSW)', desc: 'Leads the practice of CSW in his/her office/unit' }
             ]},
-            lead: { standard: true, label: 'Leadership Competencies', level: 'Basic', rating_label: 'Rating', rows: [
-                { id: 'lc1', title: 'LC1 – STRATEGIC LEADERSHIP (THINKING STRATEGICALLY AND CREATIVELY)', desc: 'Develops office/ service’s strategies and plans based on the DENR’s mission/vision' },
-                { id: 'lc2', title: 'LC2 – LEADING CHANGE', desc: 'Effectively delivers messages that require careful planning for the method used and the possible impact of the message (audience may be a large group, i.e., office, organization) Focus of communication is to relay information and to build motivation' },
-                { id: 'lc3', title: 'LC3 – PEOPLE DEVELOPMENT (CREATING AND NURTURING A HIGH PERFORMING ORGANIZATION)', desc: 'Analyzes appropriateness of office software and equipment in the performance of assigned tasks. Develops information assets to achieve organizational goals' },
-                { id: 'lc4', title: 'LC4 – PEOPLE PERFORMANCE MANAGEMENT (MANAGING PERFORMANCE AND COACHING FOR RESULTS)', desc: 'Leads in project management activities' },
-                { id: 'lc5', title: 'LC5 – PARTNERSHIP AND NETWORKING (BUILDING COLLABORATIVE AND INCLUSIVE WORKING RELATIONSHIPS)', desc: 'Leads the practice of CSW in his/her office/unit' }
-            ]},
-            func: { standard: true, label: 'Functional Competencies', level: 'Advanced', rating_label: 'Rating', rows: [
+            lead: { standard: true, label: 'Leadership Competencies', level: 'Basic', rating_label: 'Rating', rows: <?php echo $defaultLeadershipRowsJson; ?> },
+            func: { standard: true, label: 'Functional Competencies', level: 'Basic', rating_label: 'Rating', rows: [
                 { id: 'pcp1', title: 'PCP1 – PLANNING AND PROGRAMMING', desc: 'Organizes the preparation of the PENRO operational plans' },
                 { id: 'pcp2', title: 'PCP2 – MONITORING AND EVALUATION', desc: 'Leads the preparation of monitoring and evaluation reports of all DENR-PENRO programs and projects' },
                 { id: 'pcp3', title: 'PCP3 – STATISTICAL COORDINATION AND DATA RESEARCH', desc: 'Leads the conduct of statistical coordination and data research activities' },
@@ -397,8 +529,12 @@ require_admin();
             tab.setAttribute('role', 'tab');
             tab.setAttribute('aria-selected', activeSectionKey === key ? 'true' : 'false');
             tab.addEventListener('click', () => {
-                activeSectionKey = key;
-                renderSections();
+                const updateSection = () => {
+                    activeSectionKey = key;
+                    renderSections();
+                };
+                if (typeof window.runUITransition === 'function') window.runUITransition(updateSection, 'section');
+                else updateSection();
             });
             tabs.appendChild(tab);
         });
@@ -416,10 +552,33 @@ require_admin();
         maxSalaryGradeInput.disabled = !hasTemplate;
         templateRegionInput.disabled = !hasTemplate;
         templateFieldInput.disabled = !hasTemplate;
+        templateOfficeTypeInput.disabled = !hasTemplate;
+        templateSourceSheetInput.disabled = !hasTemplate;
         templateSharedInput.disabled = !hasTemplate;
         sectionSelect.disabled = !hasSections;
         emptyState.classList.toggle('hidden', !hasTemplate || hasSections);
         document.getElementById('sectionNote').classList.toggle('hidden', !hasSections);
+    }
+
+    function syncLeadershipRows(section) {
+        if (!section) return false;
+        const level = ['Basic', 'Intermediate', 'Advanced'].includes(section.level)
+            ? section.level
+            : (Number(currentTemplate.min_salary_grade) <= BASIC_MAX_SG ? 'Basic' : 'Advanced');
+        const canonicalRows = level === 'Advanced' ? LEADERSHIP_ROWS_ADVANCED : LEADERSHIP_ROWS_BASIC;
+        if (!Array.isArray(section.rows)) section.rows = [];
+        let changed = false;
+        canonicalRows.forEach((canonicalRow, index) => {
+            const existing = section.rows[index];
+            if (!existing) {
+                section.rows[index] = { ...canonicalRow };
+                changed = true;
+            } else if (existing.title !== canonicalRow.title || existing.desc !== canonicalRow.desc) {
+                section.rows[index] = { ...existing, title: canonicalRow.title, desc: canonicalRow.desc };
+                changed = true;
+            }
+        });
+        return changed;
     }
 
     function renderSections() {
@@ -432,6 +591,7 @@ require_admin();
         }
 
         const sections = currentTemplate.layout.sections;
+        const leadershipRowsChanged = sections.lead ? syncLeadershipRows(sections.lead) : false;
         const sectionKeys = Object.keys(sections);
         if (!sectionKeys.includes(activeSectionKey)) activeSectionKey = sectionKeys[0] || null;
         Object.entries(currentTemplate.layout.sections).forEach(([key, section]) => {
@@ -468,12 +628,18 @@ require_admin();
             deleteSection.dataset.section = key;
             deleteSection.title = 'Delete this section';
             deleteSection.textContent = '×';
-            const levelInput = document.createElement('input');
-            levelInput.type = 'text';
+            const levelInput = document.createElement('select');
             levelInput.className = 'sec-level';
             levelInput.dataset.section = key;
-            levelInput.value = section.level || '';
-            levelInput.placeholder = 'Advanced';
+            ['Basic', 'Intermediate', 'Advanced'].forEach(level => {
+                const option = document.createElement('option');
+                option.value = level;
+                option.textContent = level;
+                levelInput.appendChild(option);
+            });
+            levelInput.value = ['Basic', 'Intermediate', 'Advanced'].includes(section.level)
+                ? section.level
+                : (Number(currentTemplate.min_salary_grade) <= BASIC_MAX_SG ? 'Basic' : 'Advanced');
             head.cells[1].appendChild(levelInput);
             const ratingLabelInput = document.createElement('input');
             ratingLabelInput.type = 'text';
@@ -543,17 +709,23 @@ require_admin();
             sectionList.appendChild(actions);
         });
         titleInput.value = currentTemplate.title;
+        if (leadershipRowsChanged) markDirty();
         updateButtons();
         renderTabs();
     }
 
     function renderTemplateList() {
         templateList.replaceChildren();
+        selectedTemplateIds.clear();
+        selectAllVisible.checked = false;
+        selectAllVisible.indeterminate = false;
         const query = searchInput.value.trim().toLowerCase();
         const visibleTemplates = templates
             .filter(template => template.title.toLowerCase().includes(query))
             .sort((a, b) => Number(b.min_salary_grade ?? -1) - Number(a.min_salary_grade ?? -1)
                 || a.title.localeCompare(b.title));
+        visibleTemplateIds = visibleTemplates.map(template => template.id);
+        updateBatchDeleteControls();
         if (!visibleTemplates.length) {
             const empty = document.createElement('div');
             empty.className = 'empty-list';
@@ -565,6 +737,18 @@ require_admin();
         visibleTemplates.forEach(template => {
             const row = document.createElement('div');
             row.className = 'sheet-row';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'template-select';
+            checkbox.value = String(template.id);
+            checkbox.setAttribute('aria-label', 'Select ' + template.title);
+            checkbox.addEventListener('click', event => event.stopPropagation());
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) selectedTemplateIds.add(template.id);
+                else selectedTemplateIds.delete(template.id);
+                updateBatchDeleteControls();
+            });
 
             const name = document.createElement('button');
             name.type = 'button';
@@ -584,7 +768,8 @@ require_admin();
                 template.region || 'All regions',
                 template.field_name || 'All fields'
             ].join(' · ');
-            date.textContent = gradeRange + ' · ' + accessGroup + (Number(template.is_shared) === 1 ? ' · Shared' : ' · Private')
+            const officeType = template.office_type === 'FO' ? 'Field' : 'Region';
+            date.textContent = officeType + ' · ' + gradeRange + ' · ' + accessGroup + (Number(template.is_shared) === 1 ? ' · Shared' : ' · Private')
                 + (updatedAt && !Number.isNaN(updatedAt.getTime()) ? ' · ' + updatedAt.toLocaleString() : '');
 
             const actions = document.createElement('div');
@@ -607,30 +792,74 @@ require_admin();
                 }
             });
             actions.appendChild(remove);
-            row.append(name, date, actions);
+            row.append(checkbox, name, date, actions);
             templateList.appendChild(row);
         });
     }
 
+    function updateBatchDeleteControls() {
+        const count = selectedTemplateIds.size;
+        deleteSelectedBtn.textContent = 'Delete selected (' + count + ')';
+        deleteSelectedBtn.disabled = count === 0;
+        const selectedVisible = visibleTemplateIds.filter(id => selectedTemplateIds.has(id)).length;
+        selectAllVisible.checked = visibleTemplateIds.length > 0 && selectedVisible === visibleTemplateIds.length;
+        selectAllVisible.indeterminate = selectedVisible > 0 && selectedVisible < visibleTemplateIds.length;
+    }
+
+    selectAllVisible.addEventListener('change', () => {
+        const shouldSelect = selectAllVisible.checked;
+        visibleTemplateIds.forEach(id => {
+            if (shouldSelect) selectedTemplateIds.add(id);
+            else selectedTemplateIds.delete(id);
+        });
+        templateList.querySelectorAll('.template-select').forEach(checkbox => {
+            checkbox.checked = shouldSelect;
+        });
+        updateBatchDeleteControls();
+    });
+
+    deleteSelectedBtn.addEventListener('click', async () => {
+        const ids = Array.from(selectedTemplateIds);
+        const count = ids.length;
+        if (!count || !window.confirm('Delete ' + count + ' templates? This cannot be undone.')) return;
+        bulkDeleteStatus.textContent = '';
+        try {
+            const data = await api('template_delete_many', { ids });
+            templates = templates.filter(template => !ids.includes(template.id));
+            renderTemplateList();
+            bulkDeleteStatus.textContent = 'Deleted ' + data.deleted + ' template(s).';
+        } catch (error) {
+            bulkDeleteStatus.textContent = error.message;
+        }
+    });
+
     async function showHome() {
         if (!await saveCurrentTemplate()) return;
-        currentTemplate = null;
-        activeSectionKey = null;
-        renderTemplateList();
-        renderSections();
-        editorView.style.display = 'none';
-        homeView.style.display = 'block';
-        document.getElementById('navHome').classList.add('active');
-        document.getElementById('navOpen').classList.remove('active');
-        document.getElementById('navNew').classList.remove('active');
+        const updateView = () => {
+            currentTemplate = null;
+            activeSectionKey = null;
+            renderTemplateList();
+            renderSections();
+            editorView.style.display = 'none';
+            homeView.style.display = 'block';
+            document.getElementById('navHome').classList.add('active');
+            document.getElementById('navOpen').classList.remove('active');
+            document.getElementById('navNew').classList.remove('active');
+        };
+        if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+        else updateView();
     }
 
     function showEditor() {
-        homeView.style.display = 'none';
-        editorView.style.display = 'flex';
-        document.getElementById('navHome').classList.remove('active');
-        document.getElementById('navOpen').classList.remove('active');
-        document.getElementById('navNew').classList.remove('active');
+        const updateView = () => {
+            homeView.style.display = 'none';
+            editorView.style.display = 'flex';
+            document.getElementById('navHome').classList.remove('active');
+            document.getElementById('navOpen').classList.remove('active');
+            document.getElementById('navNew').classList.remove('active');
+        };
+        if (typeof window.runUITransition === 'function') window.runUITransition(updateView, 'workspace');
+        else updateView();
     }
 
     function markDirty() {
@@ -654,6 +883,8 @@ require_admin();
                 while (currentTemplate && isDirty) {
                     const template = currentTemplate;
                     const title = titleInput.value.trim() || 'Untitled template';
+                    template.layout.office_type = templateOfficeTypeInput.value;
+                    template.layout.source_sheet = templateSourceSheetInput.value || '';
                     isDirty = false;
                     const data = await api('template_save', {
                         id: template.id,
@@ -672,6 +903,7 @@ require_admin();
                         template.region = templateRegionInput.value || null;
                         template.field_name = templateFieldScope();
                         template.is_shared = templateSharedInput.checked ? 1 : 0;
+                        template.office_type = templateOfficeTypeInput.value;
                         titleInput.value = data.title;
                         templates = templates.map(item => item.id === template.id ? {
                             ...item,
@@ -680,7 +912,8 @@ require_admin();
                             max_salary_grade: template.max_salary_grade,
                             region: template.region,
                             field_name: template.field_name,
-                            is_shared: template.is_shared
+                            is_shared: template.is_shared,
+                            office_type: template.office_type
                         } : item);
                     }
                 }
@@ -711,11 +944,16 @@ require_admin();
             currentTemplate.layout.sections = currentTemplate.layout.sections || {};
             currentTemplate.layout.sections = withStandardSections(currentTemplate.layout.sections);
             currentTemplate.layout.labels = { ...DEFAULT_SHEET_LABELS, ...(currentTemplate.layout.labels || {}) };
+            currentTemplate.layout.office_type = currentTemplate.layout.office_type || 'RO';
+            currentTemplate.layout.source_sheet = currentTemplate.layout.source_sheet || '';
             titleInput.value = currentTemplate.title || 'Untitled template';
             minSalaryGradeInput.value = currentTemplate.min_salary_grade ?? 0;
             maxSalaryGradeInput.value = currentTemplate.max_salary_grade ?? 17;
             templateRegionInput.value = currentTemplate.region || '';
             setTemplateFieldScope(currentTemplate.field_name || '');
+            templateOfficeTypeInput.value = currentTemplate.layout.office_type;
+            templateSourceSheetInput.value = currentTemplate.layout.source_sheet;
+            syncSourceSheetChoices();
             templateSharedInput.checked = Number(currentTemplate.is_shared) === 1;
             activeSectionKey = Object.keys(currentTemplate.layout.sections)[0] || null;
             isDirty = false;
@@ -734,7 +972,7 @@ require_admin();
         try {
             const data = await api('template_create', {
                 title: 'Untitled template',
-                layout: { sections: standardSections(), labels: { ...DEFAULT_SHEET_LABELS } },
+                layout: { sections: standardSections(), labels: { ...DEFAULT_SHEET_LABELS }, office_type: 'RO', source_sheet: '' },
                 min_salary_grade: 0,
                 max_salary_grade: 17,
                 region: null,
@@ -749,7 +987,8 @@ require_admin();
                 max_salary_grade: 17,
                 region: null,
                 field_name: null,
-                is_shared: 0
+                is_shared: 0,
+                office_type: 'RO'
             };
             templates.unshift(template);
             currentTemplate = template;
@@ -759,6 +998,9 @@ require_admin();
             maxSalaryGradeInput.value = template.max_salary_grade;
             templateRegionInput.value = '';
             setTemplateFieldScope('');
+            templateOfficeTypeInput.value = 'RO';
+            templateSourceSheetInput.value = '';
+            syncSourceSheetChoices();
             templateSharedInput.checked = false;
             activeSectionKey = 'core';
             isDirty = false;
@@ -777,7 +1019,7 @@ require_admin();
         currentTemplate.layout.sections[secKey] = {
             custom: true,
             label: '',
-            level: 'Advanced',
+            level: Number(currentTemplate.min_salary_grade) <= BASIC_MAX_SG ? 'Basic' : 'Advanced',
             rating_label: 'Rating',
             rows: [{ id: rowId, title: '', desc: '', is_header: false }]
         };
@@ -824,7 +1066,7 @@ require_admin();
     async function useTemplate() {
         if (!currentTemplate || !await saveCurrentTemplate()) return;
         const salaryGrade = Number(currentTemplate.min_salary_grade);
-        const gradeParam = Number.isInteger(salaryGrade) && salaryGrade >= 0 && salaryGrade <= 25
+        const gradeParam = Number.isInteger(salaryGrade) && salaryGrade >= 0 && salaryGrade <= 26
             ? '&salary_grade=' + encodeURIComponent(salaryGrade)
             : '';
         window.location.href = 'index.php?template_id=' + encodeURIComponent(currentTemplate.id) + gradeParam;
@@ -850,6 +1092,18 @@ require_admin();
         input.addEventListener('input', markDirty);
         input.addEventListener('change', markDirty);
     });
+    templateOfficeTypeInput.addEventListener('change', () => {
+        syncSourceSheetChoices();
+        if (!currentTemplate) return;
+        currentTemplate.layout.office_type = templateOfficeTypeInput.value;
+        currentTemplate.layout.source_sheet = templateSourceSheetInput.value || '';
+        markDirty();
+    });
+    templateSourceSheetInput.addEventListener('change', () => {
+        if (!currentTemplate) return;
+        currentTemplate.layout.source_sheet = templateSourceSheetInput.value || '';
+        markDirty();
+    });
     templateFieldInput.addEventListener('change', () => {
         templateFieldOtherInput.hidden = templateFieldInput.value !== 'Other';
         if (templateFieldInput.value !== 'Other') templateFieldOtherInput.value = '';
@@ -862,7 +1116,13 @@ require_admin();
         const section = currentTemplate?.layout.sections[target.dataset.section];
         if (!section) return;
         if (target.classList.contains('sec-label')) section.label = target.value;
-        else if (target.classList.contains('sec-level')) section.level = target.value;
+        else if (target.classList.contains('sec-level')) {
+            section.level = target.value;
+            if (target.dataset.section === 'lead') {
+                syncLeadershipRows(section);
+                renderSections();
+            }
+        }
         else if (target.classList.contains('sec-rating-label')) section.rating_label = target.value;
         else if (target.classList.contains('row-title') || target.classList.contains('row-desc')) {
             const row = section.rows.find(item => item.id === target.dataset.rowId);
@@ -874,6 +1134,11 @@ require_admin();
             renderTabs();
         }
         markDirty();
+    });
+    sectionList.addEventListener('change', event => {
+        if (event.target.classList.contains('sec-level')) {
+            event.target.dispatchEvent(new Event('input', { bubbles: true }));
+        }
     });
 
     sheetLabelFields.addEventListener('input', event => {

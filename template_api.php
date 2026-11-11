@@ -45,8 +45,8 @@ function clean_template_grade_range($data): array {
     }
     $min = (int)$min;
     $max = (int)$max;
-    if ($min < 0 || $max > 25 || $min > $max) {
-        throw new InvalidArgumentException('Choose a valid salary-grade range from 0 to 25.');
+    if ($min < 0 || $max > 26 || $min > $max) {
+        throw new InvalidArgumentException('Choose a valid salary-grade range from 0 to 26.');
     }
     if (!isset($data['is_shared']) || !is_bool($data['is_shared'])) {
         throw new InvalidArgumentException('Choose whether this form is available to raters.');
@@ -68,7 +68,7 @@ function clean_template_scope($data): array {
     return [$region, $fieldName];
 }
 
-function clean_template_layout($layout): array {
+function clean_template_layout($layout, int $minSalaryGrade = 0): array {
     if (!is_array($layout) || !is_array($layout['sections'] ?? null)) {
         throw new InvalidArgumentException('Invalid template layout.');
     }
@@ -152,9 +152,13 @@ function clean_template_layout($layout): array {
                 'is_header' => false
             ];
         }
+        $level = trim((string)($section['level'] ?? ''));
+        if (!in_array($level, ['Basic', 'Intermediate', 'Advanced'], true)) {
+            $level = template_level_for_salary_grade($minSalaryGrade);
+        }
         $cleanSection = [
             'label' => mb_substr((string)($section['label'] ?? ''), 0, 255),
-            'level' => mb_substr((string)($section['level'] ?? ''), 0, 100),
+            'level' => $level,
             'rating_label' => mb_substr((string)($section['rating_label'] ?? 'Rating'), 0, 100),
             'rows' => $cleanRows
         ];
@@ -260,6 +264,15 @@ if ($method === 'GET') {
         if (!$template) sheets_json_out(['status' => 'error', 'message' => 'Template not found.'], 404);
         $template['id'] = (int)$template['id'];
         $template['layout'] = json_decode($template['layout_json'], true);
+        if (is_array($template['layout']['sections'] ?? null)) {
+            foreach ($template['layout']['sections'] as &$section) {
+                $level = trim((string)($section['level'] ?? ''));
+                if (!in_array($level, ['Basic', 'Intermediate', 'Advanced'], true)) {
+                    $section['level'] = template_level_for_salary_grade((int)$template['min_salary_grade']);
+                }
+            }
+            unset($section);
+        }
         unset($template['layout_json']);
         sheets_json_out(['status' => 'success', 'template' => $template]);
     }
@@ -304,7 +317,7 @@ if (!verify_csrf($data['csrf_token'] ?? null)) {
 }
 
 $action = $data['action'] ?? '';
-if (in_array($action, ['template_create', 'template_save', 'template_delete'], true)) {
+if (in_array($action, ['template_create', 'template_save', 'template_delete', 'template_delete_many'], true)) {
     require_admin(true);
 }
 if ($action === 'template_update_leadership_labels') {
@@ -324,20 +337,17 @@ try {
             || !access_field_is_valid($viewer['field_name'] ?? null)) {
             sheets_json_out(['status' => 'error', 'message' => 'Your account profile or selected salary grade is invalid.'], 403);
         }
-        if ($label === '' || mb_strlen($label) > 255 || $level === '' || mb_strlen($level) > 100) {
+        if ($label === '' || mb_strlen($label) > 255 || !in_array($level, ['Basic', 'Intermediate', 'Advanced'], true)) {
             throw new InvalidArgumentException('Enter a Leadership heading and level label within the allowed lengths.');
         }
 
         $candidateGrade = (int)$gradeValue;
-        if (position_is_basic_level($candidateGrade)) {
-            sheets_json_out(['status' => 'error', 'message' => 'Basic-level forms do not have a Leadership section.'], 422);
-        }
         $userGrade = (int)$viewer['salary_grade'];
         $region = $viewer['region'];
         $fieldName = $viewer['field_name'];
         $conn->begin_transaction();
         try {
-            $stmt = $conn->prepare('SELECT layout_json FROM competency_templates WHERE id = ? AND is_shared = 1 AND min_salary_grade <= ? AND max_salary_grade >= ? AND min_salary_grade <= ? AND max_salary_grade >= ? AND (region IS NULL OR region = ?) AND (field_name IS NULL OR field_name = ?) LIMIT 1 FOR UPDATE');
+            $stmt = $conn->prepare('SELECT layout_json, min_salary_grade FROM competency_templates WHERE id = ? AND is_shared = 1 AND min_salary_grade <= ? AND max_salary_grade >= ? AND min_salary_grade <= ? AND max_salary_grade >= ? AND (region IS NULL OR region = ?) AND (field_name IS NULL OR field_name = ?) LIMIT 1 FOR UPDATE');
             $stmt->bind_param('iiiiiss', $id, $candidateGrade, $candidateGrade, $userGrade, $userGrade, $region, $fieldName);
             $stmt->execute();
             $template = $stmt->get_result()->fetch_assoc();
@@ -348,7 +358,7 @@ try {
             }
 
             $layout = json_decode($template['layout_json'], true);
-            $layout = clean_template_layout($layout);
+            $layout = clean_template_layout($layout, (int)$template['min_salary_grade']);
             if (!isset($layout['sections']['lead']) || empty($layout['sections']['lead']['standard'])) {
                 throw new InvalidArgumentException('This sheet does not have an editable standard Leadership section.');
             }
@@ -370,8 +380,8 @@ try {
 
     if ($action === 'template_create') {
         $title = clean_template_title($data['title'] ?? 'Untitled template');
-        $layout = json_encode(clean_template_layout($data['layout'] ?? null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         [$minGrade, $maxGrade, $isShared] = clean_template_grade_range($data);
+        $layout = json_encode(clean_template_layout($data['layout'] ?? null, $minGrade), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         [$region, $fieldName] = clean_template_scope($data);
         $stmt = $conn->prepare('INSERT INTO competency_templates (owner_id, title, layout_json, min_salary_grade, max_salary_grade, region, field_name, is_shared) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->bind_param('issiissi', $ownerId, $title, $layout, $minGrade, $maxGrade, $region, $fieldName, $isShared);
@@ -386,8 +396,8 @@ try {
         if ($id < 1) sheets_json_out(['status' => 'error', 'message' => 'Invalid template.'], 400);
         if ($action === 'template_save') {
             $title = clean_template_title($data['title'] ?? 'Untitled template');
-            $layout = json_encode(clean_template_layout($data['layout'] ?? null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             [$minGrade, $maxGrade, $isShared] = clean_template_grade_range($data);
+            $layout = json_encode(clean_template_layout($data['layout'] ?? null, $minGrade), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             [$region, $fieldName] = clean_template_scope($data);
             $stmt = $conn->prepare('UPDATE competency_templates SET title = ?, layout_json = ?, min_salary_grade = ?, max_salary_grade = ?, region = ?, field_name = ?, is_shared = ? WHERE id = ?');
             $stmt->bind_param('ssiissii', $title, $layout, $minGrade, $maxGrade, $region, $fieldName, $isShared, $id);
@@ -411,6 +421,39 @@ try {
         $stmt->close();
         if (!$deleted) sheets_json_out(['status' => 'error', 'message' => 'Template not found.'], 404);
         sheets_json_out(['status' => 'success']);
+    }
+
+    if ($action === 'template_delete_many') {
+        $requestedIds = $data['ids'] ?? null;
+        if (!is_array($requestedIds) || count($requestedIds) > 200) {
+            throw new InvalidArgumentException('Choose between 1 and 200 templates to delete.');
+        }
+        $ids = [];
+        foreach ($requestedIds as $value) {
+            if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
+                throw new InvalidArgumentException('Template IDs must be positive integers.');
+            }
+            $id = (int)$value;
+            if ($id < 1) throw new InvalidArgumentException('Template IDs must be positive integers.');
+            if (!in_array($id, $ids, true)) $ids[] = $id;
+        }
+        if (!$ids) throw new InvalidArgumentException('Choose at least one template to delete.');
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $types = str_repeat('i', count($ids));
+        $conn->begin_transaction();
+        try {
+            $stmt = $conn->prepare("DELETE FROM competency_templates WHERE id IN ({$placeholders})");
+            $stmt->bind_param($types, ...$ids);
+            $stmt->execute();
+            $deleted = $stmt->affected_rows;
+            $stmt->close();
+            $conn->commit();
+        } catch (Throwable $e) {
+            $conn->rollback();
+            throw $e;
+        }
+        sheets_json_out(['status' => 'success', 'deleted' => $deleted]);
     }
 
     if ($action === 'create') {

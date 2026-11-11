@@ -10,23 +10,26 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/AuthSchema.php';
 require_once __DIR__ . '/PositionsSchema.php';
 require_once __DIR__ . '/Raters.php';
-require_once __DIR__ . '/Audit.php';
 require_once __DIR__ . '/competency_template_schema.php';
 require_once __DIR__ . '/sheets_schema.php';
+require_once __DIR__ . '/DraftsSchema.php';
 
 try {
+    if (!app_allow_ddl()) {
+        throw new RuntimeException('Database schema changes are disabled by app_allow_ddl().');
+    }
+
     ensure_auth_schema($conn);
     ensure_positions_schema($conn);
     ensure_schema($conn);
-    ensure_audit_table($conn);
     ensure_competency_template_schema($conn);
     ensure_sheets_schema($conn);
-    fwrite(STDOUT, "Database setup completed successfully.\n");
+    ensure_drafts_schema($conn);
+    app_require_tables($conn, ['password_reset_requests', 'form_drafts']);
+    fwrite(STDOUT, "Database setup completed successfully for '" . DB_NAME . "'.\n");
 } catch (Throwable $exception) {
     error_log('setup.php failed: ' . $exception);
-    fwrite(STDERR, "Database setup failed. Check the private application error log.\n");
-    if (defined('APP_DEV_MODE') && APP_DEV_MODE === true) {
-        fwrite(STDERR, $exception->getMessage() . PHP_EOL);
-    }
+    fwrite(STDERR, "Database setup failed for '" . DB_NAME . "' at " . DB_HOST . ':' . DB_PORT . ".\n");
+    fwrite(STDERR, "Error: " . $exception->getMessage() . PHP_EOL);
     exit(1);
 }

@@ -11,25 +11,6 @@ require_once __DIR__ . '/competency_template_schema.php';
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
-$templateCustomCompetencies = [];
-$templateResult = $conn->query('SELECT layout_json FROM competency_templates');
-while ($templateRow = $templateResult->fetch_assoc()) {
-    $templateLayout = json_decode((string)$templateRow['layout_json'], true);
-    if (!is_array($templateLayout['sections'] ?? null)) continue;
-    foreach ($templateLayout['sections'] as $sectionId => $section) {
-        if (empty($section['custom']) || !is_array($section['rows'] ?? null)) continue;
-        foreach ($section['rows'] as $row) {
-            if (!is_array($row) || empty($row['id'])) continue;
-            $key = $sectionId . '|' . $row['id'];
-            $templateCustomCompetencies[$key] = [
-                'sectionId' => (string)$sectionId,
-                'competencyId' => (string)$row['id'],
-                'label' => (string)($section['label'] ?? 'Untitled section') . ' — ' . (string)($row['title'] ?? 'Untitled competency')
-            ];
-        }
-    }
-}
-
 $storedOrders = [];
 try {
     $storedOrders = all_position_rater_orders($conn);
@@ -182,95 +163,70 @@ foreach ($groupedCandidates as $officeKey => $list) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="chrome" content="nofill">
     <title>Master Interview Summary Rating Sheet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="mockup.css?v=<?php echo filemtime(__DIR__ . '/mockup.css'); ?>">
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
-        * { box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; margin: 0; padding: 15px; background-color: #f3f3f3; color: #000; font-size: 12px; }
-        .excel-tabs-container { display: flex; align-items: flex-end; gap: 5px; background-color: #e1e1e1; border: 1px solid #b0b0b0; border-bottom: none; padding: 6px 8px 0 8px; border-radius: 4px 4px 0 0; }
-        #tabs-bar { display: flex; align-items: flex-end; gap: 3px; flex: 1; overflow-x: auto; }
-        .excel-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background-color: #d6d6d6; border: 1px solid #a6a6a6; border-bottom: none; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 11px; font-weight: 600; color: #444; user-select: none; white-space: nowrap; }
-        .excel-tab.active { background-color: #ffffff; color: #107c41; border-top: 3px solid #107c41; border-bottom: 1px solid #ffffff; font-weight: bold; }
-        .tab-close-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(220, 53, 69, 0.15); color: #c0392b; font-weight: bold; font-size: 13px; margin-left: 6px; cursor: pointer; flex-shrink: 0; }
-        .tab-close-btn:hover { background: #c0392b; color: #fff; }
-        .excel-tab-add { padding: 4px 10px; background-color: #ffffff; border: 1px solid #a6a6a6; border-radius: 3px; cursor: pointer; font-weight: bold; color: #107c41; margin-bottom: 2px; }
-        .tab-search { display: flex; align-items: center; gap: 4px; padding-bottom: 2px; }
-        .tab-search input { padding: 4px 8px; border: 1px solid #8a8a8a; border-radius: 2px; font-size: 11px; width: 180px; }
-        .table-container { display: none; background: #ffffff; padding: 25px 30px; border: 1px solid #b0b0b0; box-shadow: 0 4px 10px rgba(0,0,0,0.08); margin-bottom: 20px; }
-        .table-container.active { display: block; }
-        .table-scroll { overflow-x: auto; }
-        .doc-header { text-align: center; margin-bottom: 15px; text-transform: uppercase; line-height: 1.3; }
-        .doc-header .gov-title { font-size: 11px; font-weight: 600; color: #333; }
-        .doc-header .agency-title { font-size: 13px; font-weight: bold; color: #000; }
-        .doc-header .office-sub { font-size: 11px; font-weight: bold; color: #222; }
-        .doc-header .doc-name { font-size: 14px; font-weight: 800; color: #107c41; margin-top: 5px; text-decoration: underline; }
-        .table-block { margin-bottom: 30px; }
-        
-        .pos-delete-btn { background: rgba(255, 255, 255, 0.4); color: #000; border: 1px solid rgba(0, 0, 0, 0.3); border-radius: 50%; width: 20px; height: 20px; font-size: 13px; font-weight: bold; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; float: right;}
-        .pos-delete-btn:hover { background: #c0392b; color: #fff; border-color: #c0392b; }
-
-        .excel-table { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 11px; border: 2px solid #000000; }
-        .excel-table th, .excel-table td { border: 1px solid #000000; padding: 5px 4px; text-align: center; vertical-align: middle; }
-        .meta-row { background-color: #f2f2f2; font-weight: bold; }
-        
-.position-cell {
-    background-color: #FF99CC !important;
-    color: #FF0000;
-    font-weight: bold;
-    text-align: left;
-    padding: 6px 12px !important;
-}
-        .col-green-ave { background-color: #c6e0b4; font-weight: bold; }
-        .col-yellow-ave { background-color: #ffe699; font-weight: bold; }
-        .rater-remove { cursor: pointer; color: #c0392b; font-weight: bold; margin-left: 3px; opacity: .55; }
-        .rater-remove:hover { opacity: 1; }
-        .rater-add { display: none; }
-        .text-left { text-align: left !important; padding-left: 8px !important; }
-        th[contenteditable="true"], td[contenteditable="true"] { outline: none; cursor: cell; }
-        th[contenteditable="true"]:focus, td[contenteditable="true"]:focus { outline: 2px solid #107c41 !important; background-color: #e8f5e9 !important; }
-        .row-num-cell { background-color: #f2f2f2; font-weight: bold; width: 30px; cursor: pointer; }
+        #tables-wrapper > .table-container { display: none; }
+        #tables-wrapper > .table-container.active { display: block; }
+        #tabs .ind { z-index: 5; transition: left .42s cubic-bezier(.22, .61, .36, 1), width .42s cubic-bezier(.22, .61, .36, 1); }
+        ::view-transition-old(active-sheet) { animation: ui-sheet-out-left .42s cubic-bezier(.22, .61, .36, 1) both; }
+        ::view-transition-new(active-sheet) { animation: ui-sheet-in-right .42s cubic-bezier(.22, .61, .36, 1) both; }
+        html[data-ui-transition="sheet-reverse"]::view-transition-old(active-sheet) { animation: ui-sheet-out-right .42s cubic-bezier(.22, .61, .36, 1) both; }
+        html[data-ui-transition="sheet-reverse"]::view-transition-new(active-sheet) { animation: ui-sheet-in-left .42s cubic-bezier(.22, .61, .36, 1) both; }
+        .table-container.sheet.sl { animation: ui-sheet-in-right .42s cubic-bezier(.22, .61, .36, 1) both; }
+        .table-container.sheet.sr { animation: ui-sheet-in-left .42s cubic-bezier(.22, .61, .36, 1) both; }
+        .table-container.sheet.sl .blk, .table-container.sheet.sr .blk { animation: none; }
+        .tab-close-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 50%; background: rgba(179, 38, 30, .12); color: #b3261e; font-size: 13px; cursor: pointer; }
+        .tab-close-btn:hover { background: #b3261e; color: #fff; }
+        .pos-delete-btn { float: right; width: 20px; height: 20px; padding: 0; border: 1px solid var(--ln); border-radius: 50%; background: #fff; cursor: pointer; }
+        .row-number { display: inline; }
+        .delete-icon { display: none; color: #b3261e; font-weight: 700; }
         .row-num-cell:hover .row-number { display: none; }
-        .delete-icon { display: none; color: #d9534f; font-weight: bold; font-size: 14px; }
         .row-num-cell:hover .delete-icon { display: inline; }
-        .signatory-section { margin-top: 35px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; page-break-inside: avoid; }
-        .sig-box { text-align: center; }
-        .sig-line { margin-top: 40px; border-bottom: 1px solid #000000; width: 80%; margin-left: auto; margin-right: auto; }
-        .sig-title { font-weight: bold; margin-top: 4px; font-size: 11px; }
-        .sig-sub { font-size: 10px; color: #555; }
-        .action-bar { margin-top: 15px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 12px; background: #f3f5f6; border: 1px solid #d7dde1; border-radius: 8px; }
-        .action-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-        .action-group + .action-group { padding-left: 16px; border-left: 1px solid #cbd2d7; }
-        .action-group-admin { margin-left: auto; }
-        .action-group-logout { margin-left: 0; }
-        .btn { padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; background-color: #ffffff; border: 1px solid #7f7f7f; border-radius: 3px; text-decoration: none; color: #000; }
-        .btn:hover { background-color: #e6e6e6; }
-        .btn-primary { background-color: #107c41; color: #fff; border-color: #107c41; }
-        .btn-primary:hover { background-color: #0b5c30; }
-        @media (max-width: 768px) {
-            body { padding: 6px; font-size: 11px; }
-            .excel-tabs-container { flex-wrap: wrap; padding: 6px 6px 0 6px; }
-            #tabs-bar { width: 100%; overflow-x: auto; }
-            .excel-tab { padding: 5px 10px; font-size: 10px; }
-            .tab-search { width: 100%; padding-bottom: 6px; }
-            .tab-search input { flex: 1; width: auto; font-size: 11px; }
-            .table-container { padding: 10px 8px; }
-            .excel-table { font-size: 10px; }
-            .excel-table th, .excel-table td { padding: 4px 3px; }
-            .row-num-cell { width: 26px; }
-            .action-bar { align-items: stretch; gap: 8px; padding: 10px; }
-            .action-group { width: 100%; gap: 6px; }
-            .action-group + .action-group { padding: 8px 0 0; border-left: 0; border-top: 1px solid #cbd2d7; }
-            .action-group-admin { margin-left: 0; }
-            .action-group .btn { flex: 1 1 auto; text-align: center; }
-            .signatory-section { grid-template-columns: 1fr; gap: 30px; }
-            .tab-close-btn { width: 22px; height: 22px; font-size: 15px; margin-left: 8px; }
+        @media (max-width: 600px) {
+            #results { width: 100%; min-width: 0; padding: 8px 6px; }
+            .tabsbar { align-items: center; gap: 4px; padding: 6px 6px 0; border-radius: 8px 8px 0 0; }
+            #tabs { min-width: 0; }
+            .tab { padding: 9px 10px; font-size: 12px; white-space: nowrap; }
+            .tab-close-btn { width: 16px; height: 16px; margin-left: 4px; }
+            .tabsbar .add { margin: 0 0 4px; }
+            .srch { min-width: 0; padding: 6px 0; }
+            .srch input { min-width: 0; }
+            #tables-wrapper, .table-container.sheet { width: 100%; min-width: 0; max-width: 100%; }
+            .table-container.sheet { overflow: hidden; padding: 14px 8px; border-radius: 0 0 8px 8px; }
+            .dh { margin: 0 2px 14px; overflow-wrap: anywhere; }
+            .dh .a, .dh .c { font-size: 10px; }
+            .dh .b { font-size: 12px; }
+            .dh .d { font-size: 13px; }
+            .blk, .table-scroll.sc { width: 100%; min-width: 0; max-width: 100%; }
+            .table-scroll.sc { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; touch-action: pan-x pan-y; }
+            .excel-table th, .excel-table td { padding: 6px 4px; }
+            .excel-table .nm { min-width: 170px; }
+            .sg { gap: 22px; }
+            .ab { gap: 8px; padding: 9px; }
+            .ag { gap: 6px; }
+            .ag .btn { min-width: 0; padding: 8px 9px; font-size: 12px; }
         }
         @media print {
             @page { size: landscape; margin: 0.4in; }
-            body { background: #fff; padding: 0; }
+            body { background: #fff; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            #results, #results * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             .no-print, .excel-tabs-container, .action-bar, .rater-add, .pos-delete-btn, .tab-close-btn, .rater-remove { display: none !important; }
             .table-container { display: block !important; border: none; box-shadow: none; padding: 0; page-break-after: always; }
             .table-block { page-break-inside: avoid; }
             .table-scroll { overflow: visible !important; }
             .excel-table { min-width: 0 !important; }
+            .excel-table th, .excel-table td { background-color: #fff !important; }
+            .excel-table thead th:not(.g):not(.y) { background-color: #f4f7f5 !important; }
+            .excel-table .dt { background-color: #f4f7f5 !important; }
+            .excel-table .pc { background-color: #fbd3e5 !important; }
+            .excel-table .g { background-color: #e3f1d9 !important; }
+            .excel-table thead th.g { background-color: #cfe7bf !important; }
+            .excel-table .y { background-color: #fff2c9 !important; }
+            .excel-table thead th.y { background-color: #ffe79a !important; }
             .row-num-cell:hover .row-number { display: inline !important; }
             .row-num-cell:hover .delete-icon { display: none !important; }
         }
@@ -278,10 +234,11 @@ foreach ($groupedCandidates as $officeKey => $list) {
 </head>
 <body>
 
+<section id="results">
 <form id="resultsForm" autocomplete="off" onsubmit="return false;">
-    <div class="excel-tabs-container">
-        <div id="tabs-bar"></div>
-        <div class="tab-search">
+    <div class="excel-tabs-container tabsbar">
+        <div id="tabs"></div>
+        <div class="tab-search srch">
             <input type="text" id="candidateSearch" placeholder="Search applicant name..." autocomplete="off">
             <button type="button" class="btn" onclick="searchCandidate()">🔍 Find</button>
         </div>
@@ -289,30 +246,26 @@ foreach ($groupedCandidates as $officeKey => $list) {
 
     <div id="tables-wrapper"></div>
 
-    <div class="action-bar no-print">
-        <div class="action-group">
-            <button type="button" class="btn btn-primary" onclick="saveWholeTable(event)">💾 Save All Changes</button>
+    <div class="action-bar ab no-print">
+        <div class="action-group ag">
+            <button type="button" class="btn p btn-primary" onclick="saveWholeTable(event)">💾 Save All Changes</button>
             <button type="button" class="btn" id="importExcelButton">Import Excel</button>
             <input type="file" id="excelImportFile" accept=".xlsx,.xls,.csv" hidden>
             <button type="button" class="btn" id="exportExcelButton">Export Excel</button>
-            <button type="button" class="btn" onclick="deleteCompetency()">Delete Competency</button>
             <button type="button" class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
         </div>
-        <div class="action-group">
+        <div class="action-group ag">
             <a href="template_manager.php" class="btn">Competency Templates</a>
-            <a href="template_seed.php" class="btn">Generate Position Sheets</a>
-            <a href="positions_import.php" class="btn">Import Positions</a>
         </div>
-        <div class="action-group action-group-admin">
+        <div class="action-group ag r action-group-admin">
             <a href="manage_users.php" class="btn">👥 Manage Users</a>
-            <a href="audit_viewer.php" class="btn">Score Audit</a>
-            <a href="bulk_users.php" class="btn">Bulk Users</a>
         </div>
-        <div class="action-group action-group-logout">
-            <a href="logout.php" class="btn" style="background-color: #dc3545; color: white; border-color: #dc3545;">🚪 Logout</a>
+        <div class="action-group ag action-group-logout">
+            <a href="logout.php" class="btn d">🚪 Logout</a>
         </div>
     </div>
 </form>
+</section>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="results_excel_export.js?v=<?php echo (int)filemtime(__DIR__ . '/results_excel_export.js'); ?>"></script>
@@ -330,10 +283,10 @@ foreach ($groupedCandidates as $officeKey => $list) {
     const groupedData = <?php echo json_encode($groupedCandidates, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     let headerLabels = <?php echo json_encode($headerLabels, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     let activeTabOffice = 'REGIONAL OFFICE';
+    let sheetTransition = '';
     const RATERS = <?php echo json_encode(rater_list(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     const MIN_SLOTS = 7;
     const CSRF_TOKEN = <?php echo json_encode(csrf_token()); ?>;
-    const TEMPLATE_CUSTOM_COMPETENCIES = <?php echo json_encode(array_values($templateCustomCompetencies), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     const hiddenTabs = new Set();
     const pendingRenames = [];
     let skipNextSync = false;
@@ -355,38 +308,6 @@ foreach ($groupedCandidates as $officeKey => $list) {
     function formatVal(value) {
         if (value === null || value === undefined || isNaN(value) || value === '') return '';
         return Number(value).toFixed(2);
-    }
-
-    async function deleteCompetency() {
-        const competencies = new Map();
-        TEMPLATE_CUSTOM_COMPETENCIES.forEach(item => competencies.set(item.sectionId + '|' + item.competencyId, item));
-        Object.values(groupedData).flat().forEach(candidate => {
-            (candidate.customCompetencies || []).forEach(section => (section.rows || []).forEach(row => {
-                if (!section.id || !row.id) return;
-                const key = section.id + '|' + row.id;
-                if (!competencies.has(key)) competencies.set(key, { sectionId: section.id, competencyId: row.id, label: (section.label || 'Untitled section') + ' — ' + (row.title || 'Untitled competency') });
-            }));
-        });
-        const options = Array.from(competencies.values());
-        if (options.length === 0) return alert('There are no custom competencies in the saved candidate records.');
-        const menu = options.map((item, index) => `${index + 1}. ${item.label}`).join('\\n');
-        const answer = prompt('Enter the number of the competency to permanently delete from all candidate records and matching templates:\\n\\n' + menu);
-        if (answer === null) return;
-        const selectedIndex = Number(answer.trim()) - 1;
-        if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) return alert('Choose a valid competency number.');
-        const selected = options[selectedIndex];
-        if (!confirm(`Permanently delete "${selected.label}" from all candidate records and matching templates?`)) return;
-        try {
-            const response = await fetch('delete_competency.php', { method: 'POST', credentials: 'same-origin', body: new URLSearchParams({ section_id: selected.sectionId, competency_id: selected.competencyId, csrf_token: CSRF_TOKEN }) });
-            const data = await response.json();
-            if (!response.ok || data.status !== 'success') throw new Error(data.message || 'Unknown error');
-            Object.values(groupedData).flat().forEach(candidate => {
-                candidate.customCompetencies = (candidate.customCompetencies || []).map(section => section.id === selected.sectionId ? { ...section, rows: (section.rows || []).filter(row => row.id !== selected.competencyId) } : section).filter(section => (section.rows || []).length > 0);
-            });
-            skipNextSync = true;
-            renderAll();
-            alert(`Competency deleted from ${data.candidateRecordsChanged} candidate record(s) and ${data.templatesChanged} template(s).`);
-        } catch (error) { alert('Delete failed - the competency was NOT deleted.\\n' + error.message); }
     }
 
     function updateHeaderLabel(element, key) { headerLabels[key] = element.innerText.replace(/[\r\n\t]/g, '').trim(); renderAll(); }
@@ -425,13 +346,13 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const psychoAverage = candidate ? calculateAverage(...psychoValues) : '#DIV/0!';
         const potentialAverage = candidate ? calculateAverage(...potentialValues) : '#DIV/0!';
         return `
-            <tr data-id="${id}">
-                <td class="row-num-cell" onclick="handleRowDelete(this)"><span class="row-number">${rowNumber}</span><span class="delete-icon" title="Delete Row">×</span></td>
-                <td class="text-left" contenteditable="true" data-field="name">${name}</td>
+            <tr class="in" style="--i:${rowNumber - 1}" data-id="${id}">
+                <td class="row-num-cell n" onclick="handleRowDelete(this)"><span class="row-number">${rowNumber}</span><span class="delete-icon" title="Delete Row">×</span></td>
+                <td class="text-left nm" contenteditable="true" data-field="name">${name}</td>
                 ${psychoCells}
-                <td class="col-green-ave psycho-ave">${psychoAverage}</td>
+                <td class="col-green-ave g psycho-ave">${psychoAverage}</td>
                 ${potentialCells}
-                <td class="col-yellow-ave potential-ave">${potentialAverage}</td>
+                <td class="col-yellow-ave y potential-ave">${potentialAverage}</td>
             </tr>
         `;
     }
@@ -440,7 +361,7 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const raterHeaders = () => {
             let html = '';
             for (let index = 0; index < slots; index++) {
-                if (cols[index]) html += `<th style="width: 62px;">${escapeHtml(cols[index])}<span class="rater-remove" data-rater="${escapeHtml(cols[index])}" title="Remove this column" onclick="removeRater(this)">×</span></th>`;
+                if (cols[index]) html += `<th style="width: 62px;">${escapeHtml(cols[index])}<span class="rater-remove rx" data-rater="${escapeHtml(cols[index])}" title="Remove this column" onclick="removeRater(this)">×</span></th>`;
                 else html += '<th style="width: 62px;"></th>';
             }
             return html;
@@ -450,16 +371,16 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const escapedPosition = escapeHtml(position).replace(/'/g, "\\'").replace(/"/g, '&quot;');
         return `
             <tr>
-                <td colspan="3" class="text-left meta-row" contenteditable="true" data-field="interview_date" style="border-right: none;"><b>DATE OF INTERVIEW:</b> ${escapeHtml(currentDate)}</td>
-                <td colspan="${totalCols - 3}" class="position-cell" style="border-left: none;">POSITION TITLE: ${escapeHtml(position)}<button type="button" class="pos-delete-btn no-print" title="Delete this entire position table" onclick="deletePositionGroup(this, &quot;${escapedOffice}&quot;, &quot;${escapedPosition}&quot;)">×</button></td>
+                <td colspan="3" class="text-left meta-row dt" contenteditable="true" data-field="interview_date" style="border-right: none;"><b>DATE OF INTERVIEW:</b> ${escapeHtml(currentDate)}</td>
+                <td colspan="${totalCols - 3}" class="position-cell pc" style="border-left: none;">POSITION TITLE: ${escapeHtml(position)}<button type="button" class="pos-delete-btn no-print" title="Delete this entire position table" onclick="deletePositionGroup(this, &quot;${escapedOffice}&quot;, &quot;${escapedPosition}&quot;)">×</button></td>
             </tr>
             <tr>
-                <th style="width: 30px;">${escapeHtml(headerLabels.hash)}</th>
-                <th style="width: 230px;" contenteditable="true" onblur="updateHeaderLabel(this,'name')">${escapeHtml(headerLabels.name)}</th>
+                <th class="n" style="width: 30px;">${escapeHtml(headerLabels.hash)}</th>
+                <th class="nm" style="width: 230px;" contenteditable="true" onblur="updateHeaderLabel(this,'name')">${escapeHtml(headerLabels.name)}</th>
                 ${raterHeaders()}
-                <th class="col-green-ave" style="width: 55px; border-left: 2px solid #000 !important;" contenteditable="true" onblur="updateHeaderLabel(this,'psychoAve')">${escapeHtml(headerLabels.psychoAve)}</th>
+                <th class="col-green-ave g" style="width: 55px; border-left: 2px solid #000 !important;" contenteditable="true" onblur="updateHeaderLabel(this,'psychoAve')">${escapeHtml(headerLabels.psychoAve)}</th>
                 ${raterHeaders()}
-                <th class="col-yellow-ave" style="width: 55px; border-left: 2px solid #000 !important;" contenteditable="true" onblur="updateHeaderLabel(this,'potentialAve')">${escapeHtml(headerLabels.potentialAve)}</th>
+                <th class="col-yellow-ave y" style="width: 55px; border-left: 2px solid #000 !important;" contenteditable="true" onblur="updateHeaderLabel(this,'potentialAve')">${escapeHtml(headerLabels.potentialAve)}</th>
             </tr>
         `;
     }
@@ -473,8 +394,8 @@ foreach ($groupedCandidates as $officeKey => $list) {
         const positionAttr = posKey ? ` data-position="${escapeHtml(posKey)}"` : '';
 
         return `
-            <div class="table-block"${positionAttr}>
-                <div class="table-scroll">
+            <div class="table-block blk"${positionAttr}>
+                <div class="table-scroll sc">
                     <table class="excel-table">
                         <thead>
                             ${buildTableHeaderHtml(currentDate, branch, posKey, cols, slots, free)}
@@ -490,10 +411,10 @@ foreach ($groupedCandidates as $officeKey => $list) {
 
     function buildSignatoryBlock() {
         return `
-            <div class="signatory-section">
-                <div class="sig-box"><div class="sig-line"></div><div class="sig-title">HRMPSB SECRETARIAT</div><div class="sig-sub">Prepared By</div></div>
-                <div class="sig-box"><div class="sig-line"></div><div class="sig-title">HRMPSB COMMITTEE MEMBER</div><div class="sig-sub">Attested By</div></div>
-                <div class="sig-box"><div class="sig-line"></div><div class="sig-title">CHAIRPERSON, HRMPSB</div><div class="sig-sub">Approved By</div></div>
+            <div class="signatory-section sg">
+            <div class="sig-box"><i class="sig-line"></i><b class="sig-title">HRMPSB SECRETARIAT</b><small class="sig-sub">Prepared By</small></div>
+            <div class="sig-box"><i class="sig-line"></i><b class="sig-title">HRMPSB COMMITTEE MEMBER</b><small class="sig-sub">Attested By</small></div>
+            <div class="sig-box"><i class="sig-line"></i><b class="sig-title">CHAIRPERSON, HRMPSB</b><small class="sig-sub">Approved By</small></div>
             </div>
         `;
     }
@@ -593,18 +514,42 @@ foreach ($groupedCandidates as $officeKey => $list) {
     }
 
     function renderAll() {
+        const transitionClass = sheetTransition;
+        const update = () => renderAllNow(
+            typeof document.startViewTransition === 'function' ? '' : transitionClass
+        );
+        if (typeof window.runUITransition === 'function') {
+            const transition = transitionClass === 'sr'
+                ? 'sheet-reverse'
+                : transitionClass === 'sl' ? 'sheet-forward' : 'content';
+            return window.runUITransition(update, transition);
+        }
+        return update();
+    }
+
+    function renderAllNow(transitionClass = '') {
         if (!skipNextSync) syncFromDom();
         skipNextSync = false;
-        const tabsBar = document.getElementById('tabs-bar');
+        const tabsBar = document.getElementById('tabs');
         const wrapper = document.getElementById('tables-wrapper');
+        const previousIndicator = tabsBar.querySelector('.ind');
+        const indicatorLeft = previousIndicator ? previousIndicator.style.left : '0px';
+        const indicatorWidth = previousIndicator ? previousIndicator.style.width : '0px';
         tabsBar.innerHTML = '';
+        const indicator = document.createElement('span');
+        indicator.className = 'ind';
+        indicator.setAttribute('aria-hidden', 'true');
+        indicator.style.left = indicatorLeft;
+        indicator.style.width = indicatorWidth;
+        tabsBar.appendChild(indicator);
         wrapper.innerHTML = '';
         const branchKeys = Object.keys(groupedData);
         if (branchKeys.length > 0 && !branchKeys.includes(activeTabOffice)) activeTabOffice = branchKeys[0];
 
         branchKeys.forEach(branch => {
             const tab = document.createElement('div');
-            tab.className = `excel-tab ${branch === activeTabOffice ? 'active' : ''}`;
+            tab.className = `tab ${branch === activeTabOffice ? 'active' : ''}`;
+            tab.setAttribute('aria-selected', branch === activeTabOffice ? 'true' : 'false');
             tab.onclick = () => switchTab(branch);
             const tabLabel = document.createElement('span');
             tabLabel.innerText = branch;
@@ -619,15 +564,15 @@ foreach ($groupedCandidates as $officeKey => $list) {
 
             const candidates = groupedData[branch] || [];
             const container = document.createElement('div');
-            container.className = `table-container ${branch === activeTabOffice ? 'active' : ''}`;
+            container.className = `table-container sheet ${branch === activeTabOffice ? `active ${transitionClass}` : ''}`;
             container.setAttribute('data-office', branch);
 
             let docHeaderHtml = `
-                <div class="doc-header">
-                    <div class="gov-title">Republic of the Philippines</div>
-                    <div class="agency-title">DEPARTMENT OF ENVIRONMENT AND NATURAL RESOURCES</div>
-                    <div class="office-sub">${escapeHtml(branch)}</div>
-                    <div class="doc-name">MASTER INTERVIEW SUMMARY RATING SHEET</div>
+                <div class="doc-header dh">
+                    <div class="gov-title a">Republic of the Philippines</div>
+                    <div class="agency-title b">DEPARTMENT OF ENVIRONMENT AND NATURAL RESOURCES</div>
+                    <div class="office-sub c">${escapeHtml(branch)}</div>
+                    <div class="doc-name d">MASTER INTERVIEW SUMMARY RATING SHEET</div>
                 </div>
             `;
 
@@ -661,13 +606,26 @@ foreach ($groupedCandidates as $officeKey => $list) {
         });
 
         const addBtn = document.createElement('button');
-        addBtn.className = 'excel-tab-add';
+        addBtn.className = 'add';
         addBtn.innerText = '+ Add Tab';
         addBtn.onclick = promptNewTab;
         tabsBar.appendChild(addBtn);
+        const selectedTab = tabsBar.querySelector('.tab[aria-selected="true"]');
+        if (selectedTab) {
+            indicator.style.left = `${selectedTab.offsetLeft}px`;
+            indicator.style.width = `${selectedTab.offsetWidth}px`;
+        }
+        sheetTransition = '';
     }
 
-    function switchTab(branch) { activeTabOffice = branch; renderAll(); }
+    function switchTab(branch) {
+        const branches = Object.keys(groupedData);
+        const currentIndex = branches.indexOf(activeTabOffice);
+        const nextIndex = branches.indexOf(branch);
+        sheetTransition = nextIndex > currentIndex ? 'sl' : nextIndex < currentIndex ? 'sr' : '';
+        activeTabOffice = branch;
+        renderAll();
+    }
     function searchCandidate() {
         const query = document.getElementById('candidateSearch').value.trim().toLowerCase();
         if (query === '') return;

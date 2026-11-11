@@ -13,6 +13,8 @@ $csrfToken = csrf_token();
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Import Positions</title>
+    <link rel="stylesheet" href="ui-enhancements.css?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.css'); ?>">
+    <script src="ui-enhancements.js?v=<?php echo filemtime(__DIR__ . '/ui-enhancements.js'); ?>" defer></script>
     <style>
         :root {
             color-scheme: light;
@@ -48,7 +50,7 @@ $csrfToken = csrf_token();
 </head>
 <body>
 <main>
-    <h1>Import Regional Office Positions</h1>
+    <h1>Import Positions</h1>
     <p class="hint">Paste rows as title, salary_grade, level. Excel tab-separated rows are also accepted. Level may be B, I, or blank.</p>
     <label for="scope">Position scope</label>
     <select id="scope">

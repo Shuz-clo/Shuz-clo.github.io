@@ -1,0 +1,1139 @@
+:root {
+    --ui-accent: #107c41;
+    --ui-accent-dark: #0b5c30;
+    --ui-focus: rgba(16, 124, 65, .18);
+    --ui-ease: cubic-bezier(.2, .7, .2, 1);
+    --ui-spring: cubic-bezier(.16, 1, .3, 1);
+}
+
+@keyframes ui-content-out {
+    to { opacity: 0; }
+}
+
+@keyframes ui-content-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+@view-transition {
+    navigation: auto;
+}
+
+::view-transition-old(root) {
+    animation: ui-navigation-out .16s ease both;
+}
+
+::view-transition-new(root) {
+    animation: ui-navigation-in .42s var(--ui-spring) both;
+}
+
+::view-transition-old(active-sheet) {
+    animation: ui-sheet-out-left .24s ease both;
+}
+
+::view-transition-new(active-sheet) {
+    animation: ui-sheet-in-right .42s var(--ui-spring) both;
+}
+
+html[data-ui-transition="content"]::view-transition-old(active-sheet) {
+    animation: ui-content-out .14s ease both;
+}
+
+html[data-ui-transition="content"]::view-transition-new(active-sheet) {
+    animation: ui-content-in .24s var(--ui-spring) both;
+}
+
+html[data-ui-transition="sheet-reverse"]::view-transition-old(active-sheet) {
+    animation-name: ui-sheet-out-right;
+}
+
+html[data-ui-transition="sheet-reverse"]::view-transition-new(active-sheet) {
+    animation-name: ui-sheet-in-left;
+}
+
+::view-transition-old(workspace-home),
+::view-transition-old(workspace-editor) {
+    animation: ui-workspace-out .18s ease both;
+}
+
+::view-transition-new(workspace-home),
+::view-transition-new(workspace-editor) {
+    animation: ui-workspace-in .4s var(--ui-spring) both;
+}
+
+::view-transition-old(active-tab),
+::view-transition-old(active-section) {
+    animation: ui-content-out .14s ease both;
+}
+
+::view-transition-new(active-tab),
+::view-transition-new(active-section) {
+    animation: ui-content-in .24s var(--ui-spring) both;
+}
+
+#tables-wrapper > .table-container.active,
+#tablesContainerWrapper > .table-container.active {
+    view-transition-name: active-sheet;
+}
+
+#tabs .tab[aria-selected="true"],
+#tabs-bar .excel-tab.active {
+    view-transition-name: active-tab;
+}
+
+.template-tab[aria-selected="true"] {
+    view-transition-name: active-tab;
+}
+
+.section-table {
+    view-transition-name: active-section;
+}
+
+#homeView {
+    view-transition-name: workspace-home;
+}
+
+#editorView {
+    view-transition-name: workspace-editor;
+}
+
+:focus-visible {
+    outline: 2px solid var(--ui-accent);
+    outline-offset: 2px;
+}
+
+button,
+a[href],
+summary,
+[onclick],
+[role="button"],
+.position,
+.sheet-row,
+.template-tab,
+.excel-tab,
+.tab,
+.tpl,
+.pos {
+    transition:
+        color .18s ease,
+        background-color .18s ease,
+        border-color .18s ease,
+        box-shadow .2s ease,
+        opacity .18s ease,
+        transform .18s var(--ui-ease);
+}
+
+[onclick] {
+    cursor: pointer;
+}
+
+button:not(:disabled):hover,
+[role="button"]:not([aria-disabled="true"]):hover {
+    transform: translateY(-1px);
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+    transform: translateY(0) scale(.985);
+}
+
+button.pt:hover,
+button.pt:active,
+.rail button:hover {
+    transform: none;
+}
+
+.btn:hover,
+.button:hover,
+.sb:hover,
+.position:hover,
+.pos:hover,
+.recent-actions a:hover,
+.recent-actions button:hover,
+.resume-actions button:hover {
+    box-shadow: 0 7px 18px rgba(28, 36, 32, .12);
+}
+
+.btn:active,
+.button:active,
+.sb:active,
+.position:active,
+.pos:active,
+.recent-actions a:active,
+.recent-actions button:active,
+.resume-actions button:active {
+    box-shadow: 0 2px 6px rgba(28, 36, 32, .12);
+}
+
+button:disabled,
+button[aria-disabled="true"],
+[role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+    transition:
+        border-color .18s ease,
+        box-shadow .18s ease,
+        background-color .18s ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):hover:not(:focus):not(:disabled),
+select:hover:not(:focus):not(:disabled),
+textarea:hover:not(:focus):not(:disabled) {
+    border-color: #b7c2bb;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+    cursor: not-allowed;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    border-color: var(--ui-accent);
+    box-shadow: 0 0 0 3px var(--ui-focus);
+}
+
+input[type="checkbox"],
+input[type="radio"],
+summary,
+label[for],
+th[contenteditable="true"],
+td[contenteditable="true"] {
+    accent-color: var(--ui-accent);
+}
+
+main,
+body > .wrap,
+body > #results {
+    animation: ui-page-enter .36s var(--ui-ease) both;
+}
+
+.card,
+.cd,
+.lc,
+.paper,
+.resume-dialog {
+    animation: ui-surface-enter .52s var(--ui-spring) both;
+}
+
+.position:hover,
+.btn:hover,
+.button:hover,
+.sheet-row:hover,
+.template-tab:hover,
+.excel-tab:hover,
+.tab:hover,
+.tpl:hover,
+.pos:hover {
+    transform: translateY(-2px);
+}
+
+.resume-backdrop:not([hidden]),
+.resume-modal-backdrop:not([hidden]),
+.pdf-modal-backdrop:not([hidden]) {
+    animation: ui-backdrop-enter .18s ease both;
+}
+
+.resume-dialog,
+.resume-modal,
+.pdf-modal {
+    animation-name: ui-dialog-enter;
+    animation-duration: .42s;
+    animation-timing-function: var(--ui-spring);
+}
+
+.ui-reveal {
+    opacity: 0;
+    transform: translateY(14px) scale(.99);
+    transition:
+        opacity .5s var(--ui-spring) var(--ui-stagger, 0ms),
+        transform .6s var(--ui-spring) var(--ui-stagger, 0ms);
+}
+
+.ui-reveal.ui-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.resume-backdrop,
+.resume-modal-backdrop,
+.pdf-modal-backdrop {
+    transition: opacity .22s ease, display .22s allow-discrete;
+    transition-behavior: allow-discrete;
+}
+
+.resume-backdrop[hidden],
+.resume-modal-backdrop[hidden],
+.pdf-modal-backdrop[hidden] {
+    opacity: 0;
+}
+
+.position {
+    transition:
+        opacity .2s ease,
+        transform .25s var(--ui-spring),
+        display .2s allow-discrete;
+    transition-behavior: allow-discrete;
+}
+
+.position[hidden] {
+    opacity: 0;
+    transform: translateY(6px) scale(.99);
+}
+
+#positionDropdown {
+    transition: opacity .16s ease, display .16s allow-discrete;
+    transition-behavior: allow-discrete;
+    opacity: 1;
+}
+
+#positionDropdown:not(.open) {
+    opacity: 0;
+}
+
+button[aria-busy="true"] {
+    pointer-events: none;
+}
+
+button[aria-busy="true"]::after {
+    width: 12px;
+    height: 12px;
+    margin-left: 9px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    content: "";
+    display: inline-block;
+    vertical-align: -2px;
+    animation: ui-spin .65s linear infinite;
+}
+
+@keyframes ui-page-enter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes ui-surface-enter {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-backdrop-enter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes ui-dialog-enter {
+    from { opacity: 0; transform: translateY(10px) scale(.99); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes ui-navigation-out {
+    to { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes ui-navigation-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-sheet-out-left {
+    to { opacity: 0; transform: translateX(-24px); }
+}
+
+@keyframes ui-sheet-in-right {
+    from { opacity: 0; transform: translateX(24px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ui-sheet-out-right {
+    to { opacity: 0; transform: translateX(24px); }
+}
+
+@keyframes ui-sheet-in-left {
+    from { opacity: 0; transform: translateX(-24px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ui-workspace-out {
+    to { opacity: 0; transform: translateY(8px) scale(.995); }
+}
+
+@keyframes ui-workspace-in {
+    from { opacity: 0; transform: translateY(12px) scale(.995); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+
+    .ui-reveal {
+        opacity: 1;
+        transform: none;
+        transition-delay: 0s !important;
+    }
+}
+
+@media print {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+}
+
+@media (max-width: 760px) {
+    html,
+    body {
+        max-width: 100%;
+        overflow-x: clip;
+    }
+
+    body > main,
+    body > .wrap,
+    body > #results {
+        width: 100%;
+        min-width: 0;
+    }
+
+    body > main {
+        max-width: 100%;
+    }
+
+    h1 {
+        font-size: clamp(1.35rem, 5vw, 1.8rem);
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+
+    img,
+    video,
+    canvas,
+    svg {
+        max-width: 100%;
+    }
+
+    input,
+    select,
+    textarea {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .table-scroll,
+    .table-scroll.sc,
+    .tbl,
+    .sc {
+        max-width: 100%;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .card,
+    .cd,
+    .paper,
+    .empty {
+        min-width: 0;
+    }
+
+    body:has(> .rail) {
+        display: flex !important;
+        height: auto !important;
+        min-height: 100vh;
+        min-height: 100dvh;
+        flex-direction: column !important;
+        overflow-x: clip !important;
+        overflow-y: auto !important;
+    }
+
+    body:has(> .rail) .rail {
+        position: sticky;
+        z-index: 50;
+        top: 0;
+        bottom: auto;
+        order: 0;
+        display: flex !important;
+        width: 100% !important;
+        height: auto;
+        min-height: 54px;
+        flex: 0 0 auto !important;
+        flex-direction: row !important;
+        align-items: stretch;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 5px max(8px, env(safe-area-inset-left)) !important;
+        border: 0;
+        border-bottom: 1px solid rgba(32, 42, 53, .12);
+        background: #fff;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    body:has(> .rail) .rail button,
+    body:has(> .rail) .rail .small {
+        width: auto;
+        min-width: max-content;
+        min-height: 44px;
+        flex: 0 0 auto;
+        flex-direction: row !important;
+        justify-content: center;
+        gap: 7px;
+        padding: 8px 11px !important;
+        border: 0 !important;
+        border-bottom: 3px solid transparent !important;
+        font-size: 12px !important;
+        white-space: nowrap;
+    }
+
+    body:has(> .rail) .rail button.active {
+        border-bottom-color: var(--green, #107c41) !important;
+        background: #f0f7f2;
+    }
+
+    body:has(> .rail) .rail .spacer {
+        display: none;
+    }
+
+    body:has(> .rail) #homeView,
+    body:has(> .rail) #editorView {
+        width: 100%;
+        min-width: 0;
+        min-height: calc(100dvh - 54px);
+        flex: 1 0 auto;
+        overflow: visible !important;
+    }
+
+    body:has(> .rail) #homeView {
+        padding: 18px 14px !important;
+    }
+
+    body:has(> .rail) #editorView {
+        height: auto !important;
+    }
+
+    body:has(> .rail) #editorView .bar {
+        position: sticky;
+        z-index: 30;
+        top: 54px;
+        flex-wrap: wrap;
+        gap: 7px;
+        padding: 9px 10px;
+    }
+
+    body:has(> .rail) #editorView .bar button {
+        min-height: 40px;
+        flex: 1 1 auto;
+        white-space: normal;
+    }
+
+    body:has(> .rail) #editorView .gridwrap {
+        width: 100%;
+        min-height: 0;
+        flex: 1 0 auto;
+        align-items: stretch;
+        overflow: visible !important;
+        padding: 12px 8px !important;
+    }
+
+    body:has(> .rail) #editorView .editor-toolbar {
+        display: flex;
+        width: 100%;
+        max-width: none;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px;
+    }
+
+    body:has(> .rail) #editorView .editor-toolbar > * {
+        min-width: min(100%, 150px);
+        flex: 1 1 145px;
+    }
+
+    body:has(> .rail) #editorView .editor-toolbar label {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+    }
+
+    body:has(> .rail) #editorView .editor-toolbar input:not([type="checkbox"]),
+    body:has(> .rail) #editorView .editor-toolbar select {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    body:has(> .rail) #editorView .excel-tabs-container,
+    body:has(> .rail) #editorView .content,
+    body:has(> .rail) #editorView .sheet-label-editor,
+    body:has(> .rail) #editorView .add-table-btn {
+        width: 100%;
+        max-width: none;
+    }
+
+    body:has(> .rail) #editorView .paper {
+        width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        padding: 12px !important;
+    }
+
+    body:has(> .rail) #editorView .section-table {
+        min-width: 640px;
+    }
+
+    body:has(> .rail) #editorView .denr-form {
+        width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        padding: 10px !important;
+    }
+
+    body:has(> .rail) #editorView .denr-form table {
+        min-width: 680px;
+    }
+
+    body:has(> .rail) #homeView .templates {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    body:has(> .rail) #homeView .tpl {
+        width: min(100%, 225px);
+    }
+
+    body:has(> .rail) #homeView .list-head {
+        display: none;
+    }
+
+    body:has(> .rail) #homeView .sheet-row {
+        height: auto;
+        min-height: 64px;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        padding: 12px 8px;
+    }
+
+    body:has(> .rail) #homeView .sheet-row .name {
+        min-width: 0;
+        flex: 1 1 calc(100% - 44px);
+        overflow-wrap: anywhere;
+    }
+
+    body:has(> .rail) #homeView .sheet-row .col-date,
+    body:has(> .rail) #homeView .sheet-row .col-status {
+        width: auto;
+        flex: 1 1 40%;
+        font-size: 12px;
+    }
+
+    body:has(> .rail) #homeView .sheet-row .col-actions {
+        width: 36px;
+        flex: 0 0 36px;
+    }
+
+    body:has(> .rail) #templateList .sheet-row .col-date {
+        width: auto;
+        flex: 1 1 65%;
+    }
+
+    body:has(> .rail) #templateList .sheet-row .col-actions {
+        width: 36px;
+        flex: 0 0 36px;
+    }
+
+    #manageUsersPage {
+        max-width: 100%;
+        padding: 16px 10px;
+    }
+
+    #manageUsersPage .topbar,
+    body > main > header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    #manageUsersPage .nav {
+        width: 100%;
+    }
+
+    #manageUsersPage .cd {
+        padding: 14px 12px;
+    }
+
+    #manageUsersPage .access-profile-form {
+        min-width: 420px;
+    }
+
+    #manageUsersPage #accountsTable {
+        min-width: 1080px;
+    }
+
+    #results {
+        min-width: 0;
+    }
+
+    #scoringForm {
+        width: 100%;
+        min-width: 0;
+        padding: 12px;
+    }
+
+    #scoringForm .template-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 12px;
+    }
+
+    #scoringForm .template-controls label,
+    #scoringForm .template-controls input,
+    #scoringForm .template-controls select {
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+    }
+
+    #scoringForm .position-wrap {
+        width: 100%;
+    }
+
+    #scoringForm #scoringTable {
+        table-layout: fixed;
+    }
+
+    #scoringForm #scoringTable td,
+    #scoringForm #scoringTable th {
+        padding: 5px 4px;
+        overflow-wrap: anywhere;
+    }
+
+    #scoringForm .form-toolbar {
+        align-items: stretch;
+    }
+
+    #scoringForm .form-toolbar-group {
+        width: 100%;
+    }
+
+    #scoringForm .form-toolbar-group > * {
+        min-width: 0;
+        flex: 1 1 0;
+    }
+
+    #positions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    details.recent-forms {
+        padding: 13px;
+    }
+
+    .resume-dialog,
+    .resume-modal,
+    .pdf-modal {
+        max-height: min(88dvh, 720px);
+        overflow-y: auto;
+    }
+
+    body:has(> .page-nav) {
+        padding: 16px 12px;
+    }
+
+    body:has(> .page-nav) main {
+        width: 100%;
+    }
+
+    body:has(> .page-nav) main > section {
+        padding: 16px;
+    }
+
+    body:has(> .page-nav) main table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        white-space: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    body:has(> main) {
+        padding: 20px 12px;
+    }
+
+    body:has(> main) > main {
+        width: 100%;
+    }
+
+    body:has(> main) .card {
+        padding: 16px;
+    }
+
+    body:has(> main) .table-scroll table {
+        min-width: 520px;
+    }
+
+    body:has(> main) form input:not([type="checkbox"]):not([type="radio"]),
+    body:has(> main) form select,
+    body:has(> main) form textarea {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    body > main,
+    body > .wrap,
+    body > #results {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .alert,
+    .notice,
+    [role="alert"] {
+        overflow-wrap: anywhere;
+    }
+
+    button,
+    .btn,
+    .button,
+    input[type="submit"] {
+        max-width: 100%;
+    }
+
+    #manageUsersPage .create-account-form,
+    #manageUsersPage .link-candidate-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #manageUsersPage .create-account-form > button {
+        grid-column: auto;
+    }
+
+    #manageUsersPage .topbar .nav .btn {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+
+    body:has(> .rail) #editorView .bar #templateTitle {
+        width: 100%;
+        max-width: none;
+        order: 3;
+    }
+
+    body:has(> .rail) #editorView .bar .save-status {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    body:has(> .rail) #editorView .sheet-row .col-date {
+        font-size: 11px;
+    }
+}
+
+:root {
+    --ui-ink: #1c2420;
+    --ui-muted: #68746d;
+    --ui-line: #d6ddd8;
+    --ui-canvas: #f3f6f4;
+    --ui-surface: #fff;
+    --ui-radius: 12px;
+    --ui-shadow: 0 8px 24px rgba(27, 55, 39, .06);
+}
+
+body:has(> main):not(:has(> .rail)) {
+    padding: 32px 16px;
+    background: radial-gradient(ellipse at top left, #e8f2eb 0, transparent 38%), var(--ui-canvas);
+    color: var(--ui-ink);
+    font: 14px/1.5 "Public Sans", "Segoe UI", Arial, sans-serif;
+}
+
+body:has(> main):not(:has(> .rail)) > main {
+    width: min(100%, 1100px);
+    margin: 0 auto;
+}
+
+body:has(> main):not(:has(> .rail)) > main > header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    margin-bottom: 22px;
+}
+
+body:has(> main):not(:has(> .rail)) > main > header h1,
+body:has(> main):not(:has(> .rail)) > main > h1 {
+    color: var(--ui-ink);
+    font-size: clamp(1.55rem, 3vw, 2rem);
+    font-weight: 700;
+    letter-spacing: -.035em;
+    line-height: 1.2;
+}
+
+body:has(> main):not(:has(> .rail)) > main > p {
+    color: var(--ui-muted);
+}
+
+body:has(> main):not(:has(> .rail)) > main > section,
+body:has(> main):not(:has(> .rail)) > main > .card {
+    margin: 16px 0;
+    padding: clamp(16px, 2.4vw, 24px);
+    border: 1px solid var(--ui-line);
+    border-radius: var(--ui-radius);
+    background: var(--ui-surface);
+    box-shadow: var(--ui-shadow);
+}
+
+body:has(> main):not(:has(> .rail)) > main > section h2 {
+    color: var(--ui-ink);
+    font-size: 1.08rem;
+    letter-spacing: -.015em;
+}
+
+body:has(> main):not(:has(> .rail)) :is(label, legend) {
+    color: #354139;
+    font-weight: 650;
+}
+
+body:has(> main):not(:has(> .rail)) :is(
+    input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+    select
+) {
+    max-width: 100%;
+    min-height: 42px;
+    padding: 9px 11px;
+    border: 1px solid #cbd6ce;
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ui-ink);
+}
+
+body:has(> main):not(:has(> .rail)) textarea {
+    max-width: 100%;
+    padding: 10px 11px;
+    border: 1px solid #cbd6ce;
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ui-ink);
+}
+
+body:has(> main):not(:has(> .rail)) :is(input[type="checkbox"], input[type="radio"]) {
+    accent-color: var(--ui-accent);
+}
+
+body:has(> main):not(:has(> .rail)) :is(button, input[type="submit"], .button) {
+    min-height: 42px;
+    padding: 9px 15px;
+    border: 1px solid var(--ui-accent);
+    border-radius: 9px;
+    background: var(--ui-accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+body:has(> main):not(:has(> .rail)) :is(button.secondary, .button.secondary) {
+    border-color: #cbd6ce;
+    background: #fff;
+    color: var(--ui-ink);
+}
+
+body:has(> main):not(:has(> .rail)) :is(button:disabled, input[type="submit"]:disabled) {
+    opacity: .58;
+    cursor: not-allowed;
+}
+
+body:has(> main):not(:has(> .rail)) a:not(.button):not(.position):not(.recent-actions a) {
+    color: var(--ui-accent-dark);
+    text-underline-offset: 3px;
+}
+
+body:has(> main):not(:has(> .rail)) :is(.recent-actions a, .recent-actions button, .resume-actions button) {
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid #cbd6ce;
+    border-radius: 9px;
+    background: #fff;
+    color: #21412e;
+}
+
+body:has(> main):not(:has(> .rail)) :is(.recent-actions a.primary, .resume-actions button.primary) {
+    border-color: var(--ui-accent);
+    background: var(--ui-accent);
+    color: #fff;
+}
+
+body:has(> main):not(:has(> .rail)) :is(.notice, .alert, [role="alert"]) {
+    border-radius: 10px;
+    line-height: 1.5;
+}
+
+body:has(> main):not(:has(> .rail)) .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--ui-line);
+    border-radius: 10px;
+    background: #fff;
+    -webkit-overflow-scrolling: touch;
+}
+
+body:has(> main):not(:has(> .rail)) table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--ui-ink);
+}
+
+body:has(> main):not(:has(> .rail)) th {
+    background: #edf4ef;
+    color: #34443a;
+    font-weight: 700;
+}
+
+body:has(> main):not(:has(> .rail)) :is(th, td) {
+    border-color: #e5ebe6;
+}
+
+body:has(> main):not(:has(> .rail)) tbody tr:nth-child(even) td {
+    background: #fafcfb;
+}
+
+#manageUsersPage .cd {
+    border-color: var(--ui-line);
+    border-radius: var(--ui-radius);
+    box-shadow: var(--ui-shadow);
+}
+
+#manageUsersPage .topbar h1 {
+    color: var(--ui-ink);
+    font-size: clamp(1.55rem, 3vw, 2rem);
+    letter-spacing: -.035em;
+}
+
+#manageUsersPage .table-scroll {
+    border-radius: 10px;
+}
+
+body:has(> .rail) .rail {
+    background: #18382a;
+}
+
+body:has(> .rail) .rail button {
+    min-height: 48px;
+}
+
+body:has(> .rail) .rail button.active {
+    border-left-color: #70c18f;
+    background: rgba(255, 255, 255, .09);
+}
+
+body:has(> .rail) .rail button:hover {
+    background: rgba(255, 255, 255, .12);
+}
+
+body:has(> .rail) #homeView {
+    background: #f7f9f7;
+}
+
+body:has(> .rail) #homeView .templates {
+    gap: 14px;
+    border-color: #e1e8e2;
+}
+
+body:has(> .rail) #homeView .tpl {
+    border: 1px solid #e0e7e1;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(27, 55, 39, .04);
+}
+
+body:has(> .rail) #homeView .tpl:hover {
+    border-color: #a7ccb2;
+    background: #f6fbf7;
+}
+
+body:has(> .rail) .bar {
+    background: linear-gradient(105deg, #18452d, #107c41);
+}
+
+body:has(> .rail) .bar button.primary {
+    border: 1px solid rgba(255, 255, 255, .7);
+    background: #fff;
+    color: #14532d;
+    font-weight: 700;
+}
+
+body:has(> .rail) .bar button.primary:hover:not(:disabled) {
+    background: #edf7ef;
+}
+
+body:has(> .rail) .gridwrap {
+    background: #f3f6f4;
+}
+
+body:has(> .rail) .paper,
+body:has(> .rail) .denr-form {
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(27, 55, 39, .08);
+}
+
+@media (max-width: 760px) {
+    body:has(> main):not(:has(> .rail)) {
+        padding: 22px 12px;
+    }
+
+    body:has(> main):not(:has(> .rail)) > main > header {
+        margin-bottom: 16px;
+    }
+
+    body:has(> main):not(:has(> .rail)) > main > section,
+    body:has(> main):not(:has(> .rail)) > main > .card {
+        padding: 16px;
+    }
+
+    body:has(> main):not(:has(> .rail)) main table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+@media (max-width: 480px) {
+    body:has(> main):not(:has(> .rail)) {
+        padding: 16px 10px;
+    }
+
+    body:has(> main):not(:has(> .rail)) :is(button, input[type="submit"], .button) {
+        max-width: 100%;
+    }
+
+    body:has(> main):not(:has(> .rail)) > main > header nav {
+        width: 100%;
+    }
+}
